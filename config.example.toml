@@ -1,0 +1,39 @@
+[defaults]
+cluster = "local"
+message_limit = 100
+
+[clusters.local]
+brokers = ["localhost:9092"]
+client_id = "y2kexplorer"
+
+[clusters.local.auth]
+type = "none"
+
+# --- SASL/PLAIN (over TLS) ---
+# [clusters.staging]
+# brokers = ["kafka1:9093", "kafka2:9093"]
+#
+# [clusters.staging.auth]
+# type = "sasl_plain"
+# username = "user"
+# password = "secret"
+# tls = true
+
+# --- SCRAM-SHA-512 ---
+# [clusters.prod.auth]
+# type = "sasl_scram"
+# username = "user"
+# password = "secret"
+# mechanism = "SCRAM-SHA-512"
+# tls = true
+
+# --- Kerberos (GSSAPI) via keytab ---
+# [clusters.secure]
+# brokers = ["kafka1.example.com:9093"]
+#
+# [clusters.secure.auth]
+# type = "kerberos"
+# keytab = "/etc/security/keytabs/kafka-client.keytab"
+# principal = "kafka-client/host.example.com@EXAMPLE.COM"
+# service_name = "kafka"
+# tls = true

@@ -1,0 +1,5 @@
+{"event":"user.signup","user_id":"u-001","email":"alice@example.com"}
+{"event":"user.login","user_id":"u-001","ip":"10.0.0.5"}
+{"event":"user.signup","user_id":"u-002","email":"bob@example.com"}
+{"event":"user.profile_updated","user_id":"u-002","fields":["name","avatar"]}
+{"event":"user.logout","user_id":"u-001"}

@@ -1,0 +1,5 @@
+{"order_id":1001,"status":"created","amount":42.50}
+{"order_id":1002,"status":"paid","amount":19.99}
+{"order_id":1003,"status":"shipped","amount":120.00}
+{"order_id":1004,"status":"cancelled","amount":8.75}
+{"order_id":1005,"status":"created","amount":256.00}

@@ -1,0 +1,3 @@
+{"channel":"email","to":"alice@example.com","template":"welcome"}
+{"channel":"push","to":"u-002","body":"Your order shipped"}
+{"channel":"sms","to":"+15551234","body":"Verification code: 482910"}
