@@ -82,10 +82,14 @@ jobs:
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
-      - name: Build
-        run: |
-          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
-            --target ${{ matrix.target }}
+      - name: Build (Unix)
+        if: matrix.deps != 'windows'
+        run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
+
+      - name: Build (Windows)
+        if: matrix.deps == 'windows'
+        shell: pwsh
+        run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'

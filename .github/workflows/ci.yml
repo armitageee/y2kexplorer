@@ -134,10 +134,14 @@ jobs:
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
-      - name: cargo build
-        run: |
-          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
-            --target ${{ matrix.target }}
+      - name: cargo build (Unix)
+        if: matrix.deps != 'windows'
+        run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
+
+      - name: cargo build (Windows)
+        if: matrix.deps == 'windows'
+        shell: pwsh
+        run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
 
       - name: Archive binaries (Unix)
         if: matrix.deps != 'windows'
