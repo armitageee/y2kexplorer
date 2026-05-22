@@ -189,6 +189,18 @@ impl App {
                 self.close_modal();
                 self.execute_command(&cmd);
             }
+            Modal::MessageLimit { value } => {
+                let value = value.trim();
+                let limit: usize = match value.parse() {
+                    Ok(n) if (10..=10_000).contains(&n) => n,
+                    _ => {
+                        self.status = "limit must be 10–10000".into();
+                        return;
+                    }
+                };
+                self.set_message_limit(limit);
+                self.close_modal();
+            }
         }
     }
 
@@ -248,7 +260,21 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.nav_up(),
             KeyCode::Enter => self.enter(),
             KeyCode::Esc => self.pop(),
-            KeyCode::Char('p') => self.show_partitions(),
+            KeyCode::Char('p') => {
+                if matches!(self.current(), ViewStack::Messages(_)) {
+                    if let ViewStack::Messages(v) = self.current_mut() {
+                        v.cycle_partition();
+                    }
+                    self.reload_messages();
+                } else {
+                    self.show_partitions();
+                }
+            }
+            KeyCode::Char('i') => {
+                if matches!(self.current(), ViewStack::Messages(_)) {
+                    self.show_partitions();
+                }
+            }
             KeyCode::Char('b') => {
                 if let ViewStack::Messages(v) = self.current_mut() {
                     v.from_end = true;
@@ -259,6 +285,31 @@ impl App {
                 if let ViewStack::Messages(v) = self.current_mut() {
                     v.from_end = false;
                     self.reload_messages();
+                }
+            }
+            KeyCode::Char('s') => {
+                if let ViewStack::Messages(v) = self.current_mut() {
+                    v.sort_by_time = !v.sort_by_time;
+                    self.reload_messages();
+                }
+            }
+            KeyCode::Char('l') => {
+                if let ViewStack::Messages(v) = self.current() {
+                    self.modal = Some(Modal::MessageLimit {
+                        value: v.message_limit.to_string(),
+                    });
+                }
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                if let ViewStack::Messages(v) = self.current_mut() {
+                    let new = (v.message_limit + 50).min(10_000);
+                    self.set_message_limit(new);
+                }
+            }
+            KeyCode::Char('-') => {
+                if let ViewStack::Messages(v) = self.current_mut() {
+                    let new = v.message_limit.saturating_sub(50).max(10);
+                    self.set_message_limit(new);
                 }
             }
             _ => {}
@@ -346,7 +397,19 @@ impl App {
         if let ViewStack::Topics(v) = self.current() {
             if let Some(topic) = v.selected_topic() {
                 let topic = topic.to_string();
-                self.stack.push(ViewStack::Messages(MessagesView::new(&topic)));
+                let limit = self.config.defaults.message_limit;
+                let mut mv = MessagesView::new(&topic, limit);
+                if let Some(conn) = self.connection.as_ref() {
+                    match conn.topic_partitions(&topic) {
+                        Ok(parts) => {
+                            mv.partition_ids = parts.iter().map(|p| p.id).collect();
+                        }
+                        Err(e) => {
+                            self.status = format!("partitions error: {e:#}");
+                        }
+                    }
+                }
+                self.stack.push(ViewStack::Messages(mv));
                 self.reload_messages();
             }
         }
@@ -388,19 +451,38 @@ impl App {
 
     fn reload_messages_for(&mut self, topic: &str) {
         let topic = topic.to_string();
-        let from_end = match self.current() {
-            ViewStack::Messages(v) => v.from_end,
-            _ => true,
+        let (partition, limit, from_end, sort_by_time) = match self.current() {
+            ViewStack::Messages(v) => (v.partition, v.message_limit, v.from_end, v.sort_by_time),
+            _ => return,
         };
-        let limit = self.config.defaults.message_limit;
         let Some(conn) = self.connection.as_ref() else {
             return;
         };
         self.loading = true;
         self.status = format!("loading messages for {topic}…");
         if let Ok(conn) = conn.reconnect() {
-            spawn_fetch_messages(conn, topic, None, limit, from_end, self.worker_tx.clone());
+            spawn_fetch_messages(
+                conn,
+                topic,
+                partition,
+                limit,
+                from_end,
+                sort_by_time,
+                self.worker_tx.clone(),
+            );
         }
+    }
+
+    fn set_message_limit(&mut self, limit: usize) {
+        self.config.defaults.message_limit = limit;
+        if let ViewStack::Messages(v) = self.current_mut() {
+            v.message_limit = limit;
+        }
+        match self.config.save() {
+            Ok(()) => self.status = format!("message limit → {limit} (saved)"),
+            Err(e) => self.status = format!("message limit → {limit} (not saved: {e:#})"),
+        }
+        self.reload_messages();
     }
 
     fn show_partitions(&mut self) {

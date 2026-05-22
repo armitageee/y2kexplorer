@@ -27,10 +27,11 @@ pub fn spawn_fetch_messages(
     partition: Option<i32>,
     limit: usize,
     from_end: bool,
+    sort_by_time: bool,
     tx: mpsc::Sender<WorkerMsg>,
 ) {
     thread::spawn(move || {
-        let result = conn.fetch_messages(&topic, partition, limit, from_end);
+        let result = conn.fetch_messages(&topic, partition, limit, from_end, sort_by_time);
         let _ = tx.send(WorkerMsg::Messages { topic, result });
     });
 }

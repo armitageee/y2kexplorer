@@ -12,7 +12,11 @@ const HELP: &[&str] = &[
     "n", "produce",
     "b", "tail",
     "t", "head",
-    "p", "partitions",
+    "+/-", "limit ±50",
+    "l", "set limit",
+    "p", "partition",
+    "i", "partitions info",
+    "s", "sort time/offset",
     "r", "reload",
     "Esc", "back",
     "?", "help",
@@ -24,6 +28,8 @@ const HINT: &[&str] = &[
     "n", "produce",
     "b", "tail",
     "t", "head",
+    "p", "partition",
+    "s", "sort",
     "Esc", "back",
     "?", "help",
 ];
@@ -36,10 +42,14 @@ pub struct MessagesView {
     pub detail_scroll: u16,
     pub from_end: bool,
     pub show_help: bool,
+    pub message_limit: usize,
+    pub partition: Option<i32>,
+    pub partition_ids: Vec<i32>,
+    pub sort_by_time: bool,
 }
 
 impl MessagesView {
-    pub fn new(topic: impl Into<String>) -> Self {
+    pub fn new(topic: impl Into<String>, message_limit: usize) -> Self {
         let topic = topic.into();
         let title = format!("Messages: {topic}");
         Self {
@@ -50,7 +60,45 @@ impl MessagesView {
             detail_scroll: 0,
             from_end: true,
             show_help: false,
+            message_limit,
+            partition: None,
+            partition_ids: Vec::new(),
+            sort_by_time: true,
         }
+    }
+
+    pub fn list_title(&self) -> String {
+        let mode = if self.from_end { "tail" } else { "head" };
+        let part = match self.partition {
+            Some(p) => format!("p{p}"),
+            None => "all".into(),
+        };
+        let sort = if self.sort_by_time { "time" } else { "offset" };
+        format!(
+            "{} [{mode} lim={} {part} sort={sort}]",
+            self.title, self.message_limit
+        )
+    }
+
+    pub fn cycle_partition(&mut self) {
+        if self.partition_ids.is_empty() {
+            self.partition = None;
+            return;
+        }
+        self.partition = match self.partition {
+            None => Some(self.partition_ids[0]),
+            Some(current) => {
+                if let Some(pos) = self.partition_ids.iter().position(|&id| id == current) {
+                    if pos + 1 < self.partition_ids.len() {
+                        Some(self.partition_ids[pos + 1])
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
     }
 
     pub fn load(&mut self, messages: Vec<FetchedMessage>) {
@@ -118,9 +166,8 @@ impl MessagesView {
             })
             .collect();
 
-        let mode = if self.from_end { "tail" } else { "head" };
         let list = List::new(list_items)
-            .block(theme::block(format!("{} ({mode})", self.title)))
+            .block(theme::block(self.list_title()))
             .highlight_style(theme::SELECTED)
             .highlight_symbol("▸ ");
 

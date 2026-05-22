@@ -20,12 +20,23 @@ impl App {
                 }
             }
             "clusters" => self.status = self.format_clusters_list(),
+            "limit" => {
+                if let Some(n) = parts.next() {
+                    match n.parse::<usize>() {
+                        Ok(limit) if (10..=10_000).contains(&limit) => self.set_message_limit(limit),
+                        _ => self.status = "limit must be 10–10000".into(),
+                    }
+                } else {
+                    self.status = "usage: :limit <N>  (10–10000)".into();
+                }
+            }
             "help" | "h" | "?" => {
                 let cfg = AppConfig::config_path()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "?".into());
-                self.status =
-                    format!("config: {cfg}  |  :context <name>  :clusters  :help  (alias: ctx)");
+                self.status = format!(
+                    "config: {cfg}  |  :context <name>  :clusters  :limit <N>  :help  (alias: ctx)"
+                );
             }
             _ => {
                 self.status = format!("unknown command '{cmd}' — try :help");

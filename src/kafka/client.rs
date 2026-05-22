@@ -143,6 +143,7 @@ impl ClusterConnection {
         partition: Option<i32>,
         limit: usize,
         from_end: bool,
+        sort_by_time: bool,
     ) -> Result<Vec<FetchedMessage>> {
         let consumer: BaseConsumer = base_config(&self.cluster)
             .set("group.id", format!("y2kexplorer-{}", std::process::id()))
@@ -171,6 +172,7 @@ impl ClusterConnection {
             return Ok(Vec::new());
         }
 
+        let multi_partition = partition_ids.len() > 1;
         let per_partition = (limit / partition_ids.len()).max(1);
         let timeout = Timeout::After(Duration::from_secs(5));
         let mut out = Vec::with_capacity(limit);
@@ -231,7 +233,21 @@ impl ClusterConnection {
             }
         }
 
-        out.sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
+        let single_partition = partition.is_some() || !multi_partition;
+        if single_partition {
+            out.sort_by(|a, b| a.offset.cmp(&b.offset));
+        } else if sort_by_time {
+            out.sort_by(|a, b| {
+                match (a.timestamp_ms, b.timestamp_ms) {
+                    (Some(ta), Some(tb)) => ta.cmp(&tb),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
+                }
+            });
+        } else {
+            out.sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
+        }
         out.truncate(limit);
         Ok(out)
     }
@@ -424,7 +440,7 @@ mod tests {
         };
         let conn = ClusterConnection::connect(&cluster).expect("connect");
         let msgs = conn
-            .fetch_messages("orders", None, 10, true)
+            .fetch_messages("orders", None, 10, true, true)
             .expect("fetch tail");
         assert!(
             !msgs.is_empty(),

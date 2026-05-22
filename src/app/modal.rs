@@ -28,6 +28,7 @@ pub enum Modal {
         field: ModalField,
     },
     DeleteConfirm { topic: String },
+    MessageLimit { value: String },
 }
 
 impl Modal {
@@ -38,6 +39,7 @@ impl Modal {
             Modal::Produce { .. } => "Produce message",
             Modal::CreateTopic { .. } => "Create topic",
             Modal::DeleteConfirm { .. } => "Delete topic",
+            Modal::MessageLimit { .. } => "Message limit",
         }
     }
 
@@ -71,6 +73,7 @@ impl Modal {
                 _ => partitions.push(c),
             },
             Modal::DeleteConfirm { .. } => {}
+            Modal::MessageLimit { value } => value.push(c),
         }
     }
 
@@ -94,6 +97,9 @@ impl Modal {
                 }
             },
             Modal::DeleteConfirm { .. } => {}
+            Modal::MessageLimit { value } => {
+                value.pop();
+            }
         }
     }
 
@@ -108,7 +114,7 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
         Modal::DeleteConfirm { .. } => 7,
         Modal::Produce { .. } => 11,
         Modal::CreateTopic { .. } => 9,
-        Modal::Filter | Modal::Command => 5,
+        Modal::Filter | Modal::Command | Modal::MessageLimit { .. } => 5,
     };
     let popup = centered_rect(popup_w, popup_h, area);
     frame.render_widget(Clear, popup);
@@ -179,6 +185,14 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
             )),
             Line::from(""),
             Line::from(Span::styled("y confirm · n/Esc cancel", theme::FOOTER_HINT)),
+        ],
+        Modal::MessageLimit { value } => vec![
+            field_line("limit", value, true),
+            Line::from(""),
+            Line::from(Span::styled(
+                "10–10000 · Enter apply · Esc cancel",
+                theme::FOOTER_HINT,
+            )),
         ],
     };
 
