@@ -6,9 +6,17 @@ description = "Terminal UI for Apache Kafka clusters"
 license = "MIT"
 readme = "README.md"
 
+[lib]
+name = "y2kexplorer"
+path = "src/lib.rs"
+
 [[bin]]
 name = "y2k"
 path = "src/main.rs"
+
+[[bin]]
+name = "y2k-probe"
+path = "src/bin/probe.rs"
 
 [dependencies]
 ratatui = { version = "0.30", default-features = true }

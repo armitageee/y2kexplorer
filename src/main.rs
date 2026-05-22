@@ -1,8 +1,9 @@
 mod app;
-mod config;
-mod kafka;
 mod ui;
 mod views;
+
+pub use y2kexplorer::config as config;
+pub use y2kexplorer::kafka as kafka;
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -19,8 +20,8 @@ use config::AppConfig;
 #[derive(Parser, Debug)]
 #[command(name = "y2k", about = "Terminal UI for Apache Kafka")]
 struct Cli {
-    /// Path to config.toml (default: XDG config dir)
-    #[arg(short, long)]
+    /// Path to config.toml (default: ~/.config/y2kexplorer/config.toml)
+    #[arg(long)]
     config: Option<PathBuf>,
 
     /// Cluster name from config (overrides defaults.cluster)

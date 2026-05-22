@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
+use ratatui::widgets::{Cell, Row, Table, TableState};
 use ratatui::Frame;
 
 use crate::ui::theme;
@@ -115,7 +115,7 @@ impl TableView {
                 .style(theme::HEADER)
                 .bottom_margin(1),
             )
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(theme::block(title))
             .rows(rows)
             .widths(widths)
             .row_highlight_style(theme::SELECTED)

@@ -1,4 +1,4 @@
-[defaults]
+[defaults]                                                                                                                                    ─╯[defaults]
 cluster = "local"
 message_limit = 100
 
@@ -28,12 +28,15 @@ type = "none"
 # tls = true
 
 # --- Kerberos (GSSAPI) via keytab ---
-# [clusters.secure]
-# brokers = ["kafka1.example.com:9093"]
-#
-# [clusters.secure.auth]
-# type = "kerberos"
-# keytab = "/etc/security/keytabs/kafka-client.keytab"
-# principal = "kafka-client/host.example.com@EXAMPLE.COM"
-# service_name = "kafka"
-# tls = true
+[clusters.secure]
+brokers = ["kafka-b01.nk-dev01.crpt.cloud:9093"]
+
+[clusters.secure.auth]
+type = "kerberos"
+keytab = "/Users/a.tolstoy/.config/y2kexplorer/keytab.bin"
+principal = "nk_exporter_dev@CRPT.TECH"
+service_name = "kafka"
+# Брокеры CRPT на :9093 обычно SASL_PLAINTEXT + GSSAPI (как kafka-explorer), без TLS:
+tls = false
+# krb5_conf = "~/.config/y2kexplorer/krb5.conf"
+# Если брокер на SASL_SSL — tls = true и при необходимости ssl_ca / tls_verify_hostname

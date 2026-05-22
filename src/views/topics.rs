@@ -1,17 +1,31 @@
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::Frame;
 
 use crate::kafka::TopicInfo;
 use crate::ui::{draw_help, draw_status, TableView};
 
 const HELP: &[&str] = &[
-    "j/k ↑↓", "nav",
+    "j/k", "nav",
+    ":", "command",
     "/", "filter",
-    "r", "refresh",
     "Enter", "messages",
+    "n", "produce",
+    "c", "create",
+    "d", "delete",
     "p", "partitions",
+    "r", "refresh",
     "?", "help",
     "q", "quit",
+];
+
+const HINT: &[&str] = &[
+    ":", "context",
+    "Enter", "open",
+    "n", "produce",
+    "c", "create",
+    "d", "delete",
+    "/", "filter",
+    "?", "help",
 ];
 
 pub struct TopicsView {
@@ -27,6 +41,7 @@ impl TopicsView {
                 "Topics",
                 vec![
                     "NAME".into(),
+                    "MESSAGES".into(),
                     "PARTITIONS".into(),
                     "REPLICATION".into(),
                     "INTERNAL".into(),
@@ -44,6 +59,7 @@ impl TopicsView {
             .map(|t| {
                 vec![
                     t.name,
+                    t.message_count.to_string(),
                     t.partitions.to_string(),
                     t.replication.to_string(),
                     if t.internal { "yes" } else { "" }.into(),
@@ -58,24 +74,22 @@ impl TopicsView {
         row.first().map(String::as_str)
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, cluster: &str, status: &str, loading: bool) {
-        let chunks = Layout::vertical([
-            Constraint::Min(3),
-            Constraint::Length(1),
-            Constraint::Length(if self.show_help { 2 } else { 1 }),
-        ])
-        .split(area);
-
-        self.table.render(frame, chunks[0]);
-        draw_status(frame, chunks[1], cluster, status, loading);
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        main: Rect,
+        status_area: Rect,
+        keys_area: Rect,
+        cluster: &str,
+        status: &str,
+        loading: bool,
+    ) {
+        self.table.render(frame, main);
+        draw_status(frame, status_area, cluster, status, loading);
         if self.show_help {
-            draw_help(frame, chunks[2], HELP);
+            draw_help(frame, keys_area, HELP);
         } else {
-            draw_help(
-                frame,
-                chunks[2],
-                &["Enter messages", "p partitions", "/ filter", "? help"],
-            );
+            draw_help(frame, keys_area, HINT);
         }
     }
 }

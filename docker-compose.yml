@@ -5,6 +5,7 @@
 #   cargo run --release
 #
 # Брокер с хоста: localhost:9092 (см. config.example.toml)
+# Kafka UI:       http://localhost:8080
 
 services:
   kafka:
@@ -51,3 +52,16 @@ services:
       - ./docker/init-kafka.sh:/init-kafka.sh:ro
       - ./docker/sample-messages:/sample-messages:ro
     entrypoint: ["/bin/bash", "/init-kafka.sh"]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: y2k-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      DYNAMIC_CONFIG_ENABLED: "true"
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy

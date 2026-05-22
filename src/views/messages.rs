@@ -1,6 +1,6 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::kafka::FetchedMessage;
@@ -8,11 +8,24 @@ use crate::ui::{draw_help, draw_status, theme};
 
 const HELP: &[&str] = &[
     "j/k", "nav",
+    ":", "command",
+    "n", "produce",
     "b", "tail",
     "t", "head",
+    "p", "partitions",
     "r", "reload",
     "Esc", "back",
+    "?", "help",
     "q", "quit",
+];
+
+const HINT: &[&str] = &[
+    ":", "context",
+    "n", "produce",
+    "b", "tail",
+    "t", "head",
+    "Esc", "back",
+    "?", "help",
 ];
 
 pub struct MessagesView {
@@ -71,14 +84,19 @@ impl MessagesView {
         self.detail_scroll = 0;
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, cluster: &str, status: &str, loading: bool) {
-        let chunks = Layout::vertical([
-            Constraint::Percentage(35),
-            Constraint::Min(4),
-            Constraint::Length(1),
-            Constraint::Length(if self.show_help { 2 } else { 1 }),
-        ])
-        .split(area);
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        main: Rect,
+        status_area: Rect,
+        keys_area: Rect,
+        cluster: &str,
+        status: &str,
+        loading: bool,
+    ) {
+        let body = Layout::vertical([Constraint::Percentage(38), Constraint::Min(4)]).split(main);
+        let list_area = body[0];
+        let detail_area = body[1];
 
         let list_items: Vec<ListItem> = self
             .messages
@@ -102,15 +120,11 @@ impl MessagesView {
 
         let mode = if self.from_end { "tail" } else { "head" };
         let list = List::new(list_items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!("{} ({mode})", self.title)),
-            )
+            .block(theme::block(format!("{} ({mode})", self.title)))
             .highlight_style(theme::SELECTED)
             .highlight_symbol("▸ ");
 
-        frame.render_stateful_widget(list, chunks[0], &mut self.list_state);
+        frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
         let detail = self
             .selected()
@@ -120,14 +134,14 @@ impl MessagesView {
         let detail_widget = Paragraph::new(detail)
             .wrap(Wrap { trim: false })
             .scroll((self.detail_scroll, 0))
-            .block(Block::default().borders(Borders::ALL).title("detail"));
-        frame.render_widget(detail_widget, chunks[1]);
+            .block(theme::block("detail"));
+        frame.render_widget(detail_widget, detail_area);
 
-        draw_status(frame, chunks[2], cluster, status, loading);
+        draw_status(frame, status_area, cluster, status, loading);
         if self.show_help {
-            draw_help(frame, chunks[3], HELP);
+            draw_help(frame, keys_area, HELP);
         } else {
-            draw_help(frame, chunks[3], &["b tail", "t head", "Esc back"]);
+            draw_help(frame, keys_area, HINT);
         }
     }
 }
