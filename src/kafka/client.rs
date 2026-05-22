@@ -149,11 +149,7 @@ impl ClusterConnection {
         from_end: bool,
         sort_by_time: bool,
     ) -> Result<Vec<FetchedMessage>> {
-        let consumer: BaseConsumer = base_config(&self.cluster)
-            .set("group.id", format!("y2kexplorer-{}", std::process::id()))
-            .set("enable.auto.commit", "false")
-            .set("enable.partition.eof", "true")
-            .set("log_level", "4") // warning+ — меньше шума от PartitionEOF
+        let consumer: BaseConsumer = consumer_config(&self.cluster, "y2kexplorer")
             .create()
             .context("create kafka consumer")?;
 
@@ -244,11 +240,7 @@ impl ClusterConnection {
             return Ok(Vec::new());
         }
 
-        let consumer: BaseConsumer = base_config(&self.cluster)
-            .set("group.id", format!("y2kexplorer-live-{}", std::process::id()))
-            .set("enable.auto.commit", "false")
-            .set("enable.partition.eof", "true")
-            .set("log_level", "4")
+        let consumer: BaseConsumer = consumer_config(&self.cluster, "y2kexplorer-live")
             .create()
             .context("create live consumer")?;
 
@@ -417,6 +409,18 @@ fn message_headers<M: Message>(m: &M) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// Consumer для чтения сообщений: без PartitionEOF-событий (они не ошибка, а конец очереди).
+fn consumer_config(cluster: &ClusterConfig, group_prefix: &str) -> ClientConfig {
+    let mut cfg = base_config(cluster);
+    cfg.set("group.id", format!("{group_prefix}-{}", std::process::id()));
+    cfg.set("enable.auto.commit", "false");
+    // false — иначе librdkafka шлёт global ERROR PartitionEOF в tracing (портит TUI в live).
+    cfg.set("enable.partition.eof", "false");
+    cfg.set("log.connection.close", "false");
+    cfg.set("log_level", "0");
+    cfg
 }
 
 fn base_config(cluster: &ClusterConfig) -> ClientConfig {

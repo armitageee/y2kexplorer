@@ -5,8 +5,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
+use anyhow::{Context, Result};
+use arboard::Clipboard;
+
 use crate::kafka::FetchedMessage;
-use crate::ui::{draw_help, draw_status, theme};
+use crate::ui::{draw_help, draw_status, payload, theme};
 
 const HELP: &[&str] = &[
     "j/k", "nav",
@@ -21,6 +24,9 @@ const HELP: &[&str] = &[
     "s", "sort time/offset",
     "f", "live follow",
     "[/]", "poll ±1s",
+    "o", "toggle JSON pretty",
+    "y", "copy message",
+    "u/d", "scroll detail",
     "r", "reload",
     "Esc", "back",
     "?", "help",
@@ -34,6 +40,7 @@ const HINT: &[&str] = &[
     "t", "head",
     "p", "partition",
     "f", "live",
+    "y", "copy",
     "s", "sort",
     "Esc", "back",
     "?", "help",
@@ -51,6 +58,8 @@ pub struct MessagesView {
     pub partition: Option<i32>,
     pub partition_ids: Vec<i32>,
     pub sort_by_time: bool,
+    /// Pretty-print JSON в detail и при копировании.
+    pub pretty_json: bool,
     pub live: bool,
     /// Следующий offset для чтения по партициям (live-poll).
     pub next_offsets: HashMap<i32, i64>,
@@ -72,6 +81,7 @@ impl MessagesView {
             partition: None,
             partition_ids: Vec::new(),
             sort_by_time: true,
+            pretty_json: true,
             live: false,
             next_offsets: HashMap::new(),
         }
@@ -90,10 +100,30 @@ impl MessagesView {
             None => "all".into(),
         };
         let sort = if self.sort_by_time { "time" } else { "offset" };
+        let json = if self.pretty_json { "json+" } else { "json-" };
         format!(
-            "{} [{mode} lim={} {part} sort={sort}]",
+            "{} [{mode} lim={} {part} sort={sort} {json}]",
             self.title, self.message_limit
         )
+    }
+
+    pub fn scroll_detail_up(&mut self, n: u16) {
+        self.detail_scroll = self.detail_scroll.saturating_sub(n);
+    }
+
+    pub fn scroll_detail_down(&mut self, n: u16) {
+        self.detail_scroll = self.detail_scroll.saturating_add(n);
+    }
+
+    pub fn copy_selected(&self) -> Result<usize> {
+        let m = self.selected().context("no message selected")?;
+        let text = message_clipboard_text(m, self.pretty_json);
+        let len = text.len();
+        Clipboard::new()
+            .context("open clipboard")?
+            .set_text(text)
+            .context("copy to clipboard")?;
+        Ok(len)
     }
 
     pub fn sync_next_offsets(&mut self) {
@@ -203,7 +233,7 @@ impl MessagesView {
         status: &str,
         loading: bool,
     ) {
-        let body = Layout::vertical([Constraint::Percentage(38), Constraint::Min(4)]).split(main);
+        let body = Layout::vertical([Constraint::Percentage(35), Constraint::Min(8)]).split(main);
         let list_area = body[0];
         let detail_area = body[1];
 
@@ -234,9 +264,10 @@ impl MessagesView {
 
         frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
+        let pretty = self.pretty_json;
         let detail = self
             .selected()
-            .map(format_message_detail)
+            .map(|m| format_message_detail(m, pretty))
             .unwrap_or_else(|| vec![Line::from("No messages")]);
 
         let detail_widget = Paragraph::new(detail)
@@ -254,7 +285,7 @@ impl MessagesView {
     }
 }
 
-fn format_message_detail(m: &FetchedMessage) -> Vec<Line<'static>> {
+fn format_message_detail(m: &FetchedMessage, pretty_json: bool) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(vec![
             Span::styled("partition ", theme::KEY),
@@ -271,10 +302,16 @@ fn format_message_detail(m: &FetchedMessage) -> Vec<Line<'static>> {
         ]));
     }
     if let Some(key) = &m.key {
-        lines.push(Line::from(vec![
-            Span::styled("key ", theme::KEY),
-            Span::styled(key.clone(), theme::VALUE),
-        ]));
+        lines.push(Line::from(Span::styled("key", theme::KEY)));
+        if pretty_json {
+            if let Some(pretty) = payload::try_pretty_json(key) {
+                lines.extend(payload::payload_lines(&pretty, false));
+            } else {
+                lines.push(Line::from(Span::styled(key.clone(), theme::VALUE)));
+            }
+        } else {
+            lines.push(Line::from(Span::styled(key.clone(), theme::VALUE)));
+        }
     }
     if !m.headers.is_empty() {
         lines.push(Line::from(Span::styled("headers", theme::KEY)));
@@ -283,12 +320,45 @@ fn format_message_detail(m: &FetchedMessage) -> Vec<Line<'static>> {
         }
     }
     lines.push(Line::from(Span::styled("payload", theme::KEY)));
-    lines.push(Line::from(
-        m.payload
-            .clone()
-            .unwrap_or_else(|| "<null>".into()),
-    ));
+    match &m.payload {
+        Some(p) => lines.extend(payload::payload_lines(p, pretty_json)),
+        None => lines.push(Line::from("<null>")),
+    }
     lines
+}
+
+pub fn message_clipboard_text(m: &FetchedMessage, pretty_json: bool) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("partition: {}\n", m.partition));
+    out.push_str(&format!("offset: {}\n", m.offset));
+    if let Some(ts) = m.timestamp_ms {
+        out.push_str(&format!("timestamp: {}\n", format_timestamp(ts)));
+    }
+    if let Some(key) = &m.key {
+        out.push_str("key:\n");
+        out.push_str(&format_optional_json(key, pretty_json));
+        out.push('\n');
+    }
+    if !m.headers.is_empty() {
+        out.push_str("headers:\n");
+        for (k, v) in &m.headers {
+            out.push_str(&format!("  {k}: {v}\n"));
+        }
+    }
+    out.push_str("payload:\n");
+    match &m.payload {
+        Some(p) => out.push_str(&format_optional_json(p, pretty_json)),
+        None => out.push_str("<null>"),
+    }
+    out
+}
+
+fn format_optional_json(raw: &str, pretty: bool) -> String {
+    if pretty {
+        payload::try_pretty_json(raw).unwrap_or_else(|| raw.to_string())
+    } else {
+        raw.to_string()
+    }
 }
 
 fn format_timestamp(ms: i64) -> String {

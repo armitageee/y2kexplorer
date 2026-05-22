@@ -370,6 +370,42 @@ impl App {
             KeyCode::Char('f') => self.toggle_live(),
             KeyCode::Char('[') => self.adjust_live_poll(-1),
             KeyCode::Char(']') => self.adjust_live_poll(1),
+            KeyCode::Char('o') => {
+                if let ViewStack::Messages(v) = self.current_mut() {
+                    v.pretty_json = !v.pretty_json;
+                    self.status = if v.pretty_json {
+                        "JSON pretty-print on (o toggle)"
+                    } else {
+                        "JSON pretty-print off (o toggle)"
+                    }
+                    .into();
+                }
+            }
+            KeyCode::Char('y') => self.copy_selected_message(),
+            KeyCode::Char('u') => {
+                if matches!(self.current(), ViewStack::Messages(_)) {
+                    if let ViewStack::Messages(v) = self.current_mut() {
+                        v.scroll_detail_up(3);
+                    }
+                }
+            }
+            KeyCode::Char('d') => {
+                if matches!(self.current(), ViewStack::Messages(_)) {
+                    if let ViewStack::Messages(v) = self.current_mut() {
+                        v.scroll_detail_down(3);
+                    }
+                }
+            }
+            KeyCode::PageUp => {
+                if let ViewStack::Messages(v) = self.current_mut() {
+                    v.scroll_detail_up(10);
+                }
+            }
+            KeyCode::PageDown => {
+                if let ViewStack::Messages(v) = self.current_mut() {
+                    v.scroll_detail_down(10);
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -479,6 +515,16 @@ impl App {
             self.live_fetch_in_flight = false;
             self.last_live_poll = None;
             self.status = "ready".into();
+        }
+    }
+
+    fn copy_selected_message(&mut self) {
+        let ViewStack::Messages(v) = self.current() else {
+            return;
+        };
+        match v.copy_selected() {
+            Ok(bytes) => self.status = format!("copied {bytes} bytes to clipboard (y)"),
+            Err(e) => self.status = format!("copy failed: {e:#}"),
         }
     }
 

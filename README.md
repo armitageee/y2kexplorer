@@ -100,6 +100,10 @@ y2k --cluster secure    # кластер из [clusters.<name>]
 | `l` | — | ввод лимита |
 | `s` | — | сортировка time / offset |
 | `f` | — | live follow (poll новых сообщений) |
+| `o` | — | pretty JSON on/off |
+| `y` | — | копировать сообщение в буфер |
+| `u` / `d` | — | прокрутка detail |
+| PgUp/PgDn | — | прокрутка detail быстрее |
 | `[` / `]` | — | интервал live-poll ±1 с (1–30, в config) |
 | `:limit N` | — | лимит сообщений |
 | `:poll N` | — | интервал live-poll (секунды) |
@@ -157,6 +161,7 @@ klist -kt /path/to/keytab.bin   # есть ли principal@REALM?
 | `no cache for <UUID>` | y2k подменяет `KRB5CCNAME` на свой FILE cache в `/tmp` |
 | `TICKET NOT RENEWABLE` | principal/keytab vs KDC; realm в **krb5.conf** |
 | `BrokerTransportFailure` | VPN, DNS, **`ssl_ca`** при TLS |
+| `PartitionEOF` в status | Не ошибка: конец партиции при live-poll; в новых версиях подавлено (`enable.partition.eof=false`) |
 
 ## Архитектура
 
