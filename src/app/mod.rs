@@ -5,19 +5,20 @@ pub mod worker;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
-use crate::config::{AppConfig, ClusterConfig};
+use crate::config::{clamp_live_poll_secs, AppConfig, ClusterConfig};
 use crate::kafka::{ClusterConnection, PartitionInfo};
 use crate::views::{MessagesView, TopicsView, ViewStack};
 
 use modal::{draw_modal, layout_main, Modal, ModalField};
 use worker::{
     spawn_create_topic, spawn_delete_topic, spawn_fetch_messages, spawn_list_topics,
-    spawn_produce, WorkerMsg,
+    spawn_poll_live_messages, spawn_produce, WorkerMsg,
 };
 
 pub struct App {
@@ -35,6 +36,8 @@ pub struct App {
     show_partitions_popup: bool,
     partition_lines: Vec<String>,
     worker_tx: Sender<WorkerMsg>,
+    last_live_poll: Option<Instant>,
+    live_fetch_in_flight: bool,
 }
 
 impl App {
@@ -62,7 +65,55 @@ impl App {
             show_partitions_popup: false,
             partition_lines: Vec::new(),
             worker_tx,
+            last_live_poll: None,
+            live_fetch_in_flight: false,
         })
+    }
+
+    /// Периодический live-poll (вызывается из главного цикла, не блокирует UI).
+    pub fn tick(&mut self) {
+        if self.modal.is_some()
+            || self.show_partitions_popup
+            || self.live_fetch_in_flight
+            || self.loading
+        {
+            return;
+        }
+
+        let ViewStack::Messages(v) = self.current() else {
+            return;
+        };
+        if !v.live || v.next_offsets.is_empty() {
+            return;
+        }
+
+        let interval =
+            Duration::from_secs(clamp_live_poll_secs(self.config.defaults.live_poll_secs));
+        let now = Instant::now();
+        if let Some(last) = self.last_live_poll {
+            if now.duration_since(last) < interval {
+                return;
+            }
+        }
+
+        let topic = v.topic.clone();
+        let partition = v.partition;
+        let after_offsets = v.next_offsets.clone();
+        let sort_by_time = v.sort_by_time;
+        let batch = v.message_limit.min(crate::kafka::LIVE_MAX_PER_POLL);
+        let cluster = self.cluster.clone();
+
+        self.last_live_poll = Some(now);
+        self.live_fetch_in_flight = true;
+        spawn_poll_live_messages(
+            cluster,
+            topic,
+            partition,
+            after_offsets,
+            batch,
+            sort_by_time,
+            self.worker_tx.clone(),
+        );
     }
 
     pub fn init_connection(&mut self) {
@@ -278,12 +329,16 @@ impl App {
             KeyCode::Char('b') => {
                 if let ViewStack::Messages(v) = self.current_mut() {
                     v.from_end = true;
+                    v.live = false;
+                    self.last_live_poll = None;
                     self.reload_messages();
                 }
             }
             KeyCode::Char('t') => {
                 if let ViewStack::Messages(v) = self.current_mut() {
                     v.from_end = false;
+                    v.live = false;
+                    self.last_live_poll = None;
                     self.reload_messages();
                 }
             }
@@ -312,6 +367,9 @@ impl App {
                     self.set_message_limit(new);
                 }
             }
+            KeyCode::Char('f') => self.toggle_live(),
+            KeyCode::Char('[') => self.adjust_live_poll(-1),
+            KeyCode::Char(']') => self.adjust_live_poll(1),
             _ => {}
         }
         Ok(())
@@ -418,7 +476,45 @@ impl App {
     fn pop(&mut self) {
         if self.stack.len() > 1 {
             self.stack.pop();
+            self.live_fetch_in_flight = false;
+            self.last_live_poll = None;
             self.status = "ready".into();
+        }
+    }
+
+    fn toggle_live(&mut self) {
+        let ViewStack::Messages(v) = self.current_mut() else {
+            return;
+        };
+        v.live = !v.live;
+        if v.live {
+            v.from_end = true;
+            if v.messages.is_empty() {
+                self.reload_messages();
+            } else {
+                v.sync_next_offsets();
+            }
+            self.last_live_poll = None;
+            let secs = clamp_live_poll_secs(self.config.defaults.live_poll_secs);
+            self.status = format!("live on · poll every {secs}s (f off, [/] interval)");
+        } else {
+            self.live_fetch_in_flight = false;
+            self.last_live_poll = None;
+            self.status = "live off".into();
+        }
+    }
+
+    fn adjust_live_poll(&mut self, delta: i64) {
+        if !matches!(self.current(), ViewStack::Messages(_)) {
+            return;
+        }
+        let cur = self.config.defaults.live_poll_secs as i64;
+        let next = clamp_live_poll_secs((cur + delta) as u64);
+        self.config.defaults.live_poll_secs = next;
+        self.last_live_poll = None;
+        match self.config.save() {
+            Ok(()) => self.status = format!("live poll interval → {next}s (saved)"),
+            Err(e) => self.status = format!("live poll interval → {next}s (not saved: {e:#})"),
         }
     }
 
@@ -518,15 +614,46 @@ impl App {
             WorkerMsg::Topics(Err(e)) => self.status = format!("topics error: {e:#}"),
             WorkerMsg::Messages { topic, result } => match result {
                 Ok(msgs) => {
+                    let poll_secs =
+                        clamp_live_poll_secs(self.config.defaults.live_poll_secs);
                     if let ViewStack::Messages(v) = self.current_mut() {
                         if v.topic == topic {
+                            let count = msgs.len();
+                            let live = v.live;
                             v.load(msgs);
-                            self.status = format!("{} messages", v.messages.len());
+                            self.status = if live {
+                                format!("live · {count} msgs · poll {poll_secs}s")
+                            } else {
+                                format!("{count} messages")
+                            };
                         }
                     }
                 }
                 Err(e) => self.status = format!("messages error: {e:#}"),
             },
+            WorkerMsg::LiveMessages { topic, result } => {
+                self.live_fetch_in_flight = false;
+                let poll_secs = clamp_live_poll_secs(self.config.defaults.live_poll_secs);
+                match result {
+                    Ok(new) => {
+                        if let ViewStack::Messages(v) = self.current_mut() {
+                            if v.topic == topic && v.live {
+                                let single = v.partition.is_some();
+                                let limit = v.message_limit;
+                                let sort = v.sort_by_time;
+                                let n = v.append_live(new, limit, sort, single);
+                                let total = v.messages.len();
+                                self.status = if n > 0 {
+                                    format!("live · {total} msgs (+{n}) · {poll_secs}s")
+                                } else {
+                                    format!("live · {total} msgs · {poll_secs}s")
+                                };
+                            }
+                        }
+                    }
+                    Err(e) => self.status = format!("live error: {e:#}"),
+                }
+            }
             WorkerMsg::Op(Ok(msg)) => {
                 let reload_msgs = msg.contains("produced");
                 self.status = msg;

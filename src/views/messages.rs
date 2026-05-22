@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
@@ -17,6 +19,8 @@ const HELP: &[&str] = &[
     "p", "partition",
     "i", "partitions info",
     "s", "sort time/offset",
+    "f", "live follow",
+    "[/]", "poll ±1s",
     "r", "reload",
     "Esc", "back",
     "?", "help",
@@ -29,6 +33,7 @@ const HINT: &[&str] = &[
     "b", "tail",
     "t", "head",
     "p", "partition",
+    "f", "live",
     "s", "sort",
     "Esc", "back",
     "?", "help",
@@ -46,6 +51,9 @@ pub struct MessagesView {
     pub partition: Option<i32>,
     pub partition_ids: Vec<i32>,
     pub sort_by_time: bool,
+    pub live: bool,
+    /// Следующий offset для чтения по партициям (live-poll).
+    pub next_offsets: HashMap<i32, i64>,
 }
 
 impl MessagesView {
@@ -64,11 +72,19 @@ impl MessagesView {
             partition: None,
             partition_ids: Vec::new(),
             sort_by_time: true,
+            live: false,
+            next_offsets: HashMap::new(),
         }
     }
 
     pub fn list_title(&self) -> String {
-        let mode = if self.from_end { "tail" } else { "head" };
+        let mode = if self.live {
+            "LIVE"
+        } else if self.from_end {
+            "tail"
+        } else {
+            "head"
+        };
         let part = match self.partition {
             Some(p) => format!("p{p}"),
             None => "all".into(),
@@ -78,6 +94,47 @@ impl MessagesView {
             "{} [{mode} lim={} {part} sort={sort}]",
             self.title, self.message_limit
         )
+    }
+
+    pub fn sync_next_offsets(&mut self) {
+        for m in &self.messages {
+            let next = m.offset.saturating_add(1);
+            self.next_offsets
+                .entry(m.partition)
+                .and_modify(|o| *o = (*o).max(next))
+                .or_insert(next);
+        }
+    }
+
+    /// Добавить новые сообщения (live), убрать дубликаты, обрезать буфер с начала.
+    pub fn append_live(
+        &mut self,
+        new: Vec<FetchedMessage>,
+        limit: usize,
+        sort_by_time: bool,
+        single_partition: bool,
+    ) -> usize {
+        if new.is_empty() {
+            return 0;
+        }
+        let before = self.messages.len();
+        self.messages.extend(new);
+        self.messages
+            .sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
+        self.messages.dedup_by(|a, b| a.partition == b.partition && a.offset == b.offset);
+        sort_messages_in_place(&mut self.messages, single_partition, sort_by_time);
+        if self.messages.len() > limit {
+            let drop = self.messages.len() - limit;
+            self.messages.drain(0..drop);
+        }
+        self.sync_next_offsets();
+        let added = self.messages.len().saturating_sub(before);
+        if !self.messages.is_empty() {
+            self.list_state
+                .select(Some(self.messages.len().saturating_sub(1)));
+        }
+        self.detail_scroll = 0;
+        added
     }
 
     pub fn cycle_partition(&mut self) {
@@ -103,7 +160,11 @@ impl MessagesView {
 
     pub fn load(&mut self, messages: Vec<FetchedMessage>) {
         self.messages = messages;
-        if !self.messages.is_empty() {
+        self.sync_next_offsets();
+        if self.live && !self.messages.is_empty() {
+            self.list_state
+                .select(Some(self.messages.len().saturating_sub(1)));
+        } else if !self.messages.is_empty() {
             self.list_state.select(Some(0));
         }
     }
@@ -236,6 +297,27 @@ fn format_timestamp(ms: i64) -> String {
         .single()
         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
         .unwrap_or_else(|| ms.to_string())
+}
+
+fn sort_messages_in_place(
+    messages: &mut [FetchedMessage],
+    single_partition: bool,
+    sort_by_time: bool,
+) {
+    if single_partition {
+        messages.sort_by(|a, b| a.offset.cmp(&b.offset));
+    } else if sort_by_time {
+        messages.sort_by(|a, b| {
+            match (a.timestamp_ms, b.timestamp_ms) {
+                (Some(ta), Some(tb)) => ta.cmp(&tb),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
+            }
+        });
+    } else {
+        messages.sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {

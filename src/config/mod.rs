@@ -19,10 +19,24 @@ pub struct Defaults {
     pub cluster: Option<String>,
     #[serde(default = "default_message_limit")]
     pub message_limit: usize,
+    /// Интервал live-poll (секунды), 1–30.
+    #[serde(default = "default_live_poll_secs")]
+    pub live_poll_secs: u64,
 }
 
 fn default_message_limit() -> usize {
     100
+}
+
+fn default_live_poll_secs() -> u64 {
+    3
+}
+
+pub const LIVE_POLL_MIN_SECS: u64 = 1;
+pub const LIVE_POLL_MAX_SECS: u64 = 30;
+
+pub fn clamp_live_poll_secs(secs: u64) -> u64 {
+    secs.clamp(LIVE_POLL_MIN_SECS, LIVE_POLL_MAX_SECS)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +288,7 @@ impl AppConfig {
             defaults: Defaults {
                 cluster: Some("local".into()),
                 message_limit: default_message_limit(),
+                live_poll_secs: default_live_poll_secs(),
             },
             clusters,
         }

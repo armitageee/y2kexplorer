@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -48,6 +49,9 @@ pub struct FetchedMessage {
     pub payload: Option<String>,
     pub headers: Vec<(String, String)>,
 }
+
+/// Максимум новых сообщений за один live-tick (защита от всплеска).
+pub const LIVE_MAX_PER_POLL: usize = 150;
 
 pub struct ClusterConnection {
     admin: AdminClient<DefaultClientContext>,
@@ -215,40 +219,109 @@ impl ClusterConnection {
                             break;
                         }
                         got += 1;
-                        let headers = message_headers(&m);
-                        out.push(FetchedMessage {
-                            partition: m.partition(),
-                            offset: m.offset(),
-                            timestamp_ms: m.timestamp().to_millis(),
-                            key: m
-                                .key()
-                                .map(|k| String::from_utf8_lossy(k).into_owned()),
-                            payload: m
-                                .payload()
-                                .map(|p| String::from_utf8_lossy(p).into_owned()),
-                            headers,
-                        });
+                        out.push(message_to_fetched(&m));
                     }
                 }
             }
         }
 
-        let single_partition = partition.is_some() || !multi_partition;
-        if single_partition {
-            out.sort_by(|a, b| a.offset.cmp(&b.offset));
-        } else if sort_by_time {
-            out.sort_by(|a, b| {
-                match (a.timestamp_ms, b.timestamp_ms) {
-                    (Some(ta), Some(tb)) => ta.cmp(&tb),
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
-                }
-            });
-        } else {
-            out.sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
-        }
+        sort_fetched(&mut out, partition.is_some() || !multi_partition, sort_by_time);
         out.truncate(limit);
+        Ok(out)
+    }
+
+    /// Только сообщения с offset >= `after_offsets[partition]` (инкрементальный live-poll).
+    pub fn poll_new_messages(
+        &self,
+        topic: &str,
+        partition: Option<i32>,
+        after_offsets: &HashMap<i32, i64>,
+        max_messages: usize,
+        sort_by_time: bool,
+    ) -> Result<Vec<FetchedMessage>> {
+        let cap = max_messages.min(LIVE_MAX_PER_POLL);
+        if cap == 0 || after_offsets.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let consumer: BaseConsumer = base_config(&self.cluster)
+            .set("group.id", format!("y2kexplorer-live-{}", std::process::id()))
+            .set("enable.auto.commit", "false")
+            .set("enable.partition.eof", "true")
+            .set("log_level", "4")
+            .create()
+            .context("create live consumer")?;
+
+        let metadata = consumer
+            .fetch_metadata(Some(topic), Timeout::After(Duration::from_secs(5)))?;
+        let meta_topic = metadata
+            .topics()
+            .iter()
+            .find(|t| t.name() == topic)
+            .with_context(|| format!("topic '{topic}' not found"))?;
+
+        let partition_ids: Vec<i32> = meta_topic
+            .partitions()
+            .iter()
+            .map(|p| p.id())
+            .filter(|id| partition.is_none_or(|sel| sel == *id))
+            .filter(|id| after_offsets.contains_key(id))
+            .collect();
+
+        if partition_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let multi_partition = partition_ids.len() > 1;
+        let per_part = (cap / partition_ids.len()).max(1);
+        let wm_timeout = Timeout::After(Duration::from_secs(3));
+        let mut out = Vec::with_capacity(cap);
+
+        for part_id in partition_ids {
+            if out.len() >= cap {
+                break;
+            }
+            let Some(&start) = after_offsets.get(&part_id) else {
+                continue;
+            };
+            let (_low, high) = consumer.fetch_watermarks(topic, part_id, wm_timeout)?;
+            if start >= high {
+                continue;
+            }
+
+            let available = (high - start) as usize;
+            let want = per_part.min(available).min(cap - out.len());
+            if want == 0 {
+                continue;
+            }
+
+            let mut tpl = TopicPartitionList::new();
+            tpl.add_partition_offset(topic, part_id, Offset::Offset(start))?;
+            consumer.assign(&tpl)?;
+
+            let mut got = 0;
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while got < want && out.len() < cap && std::time::Instant::now() < deadline {
+                match consumer.poll(Duration::from_millis(200)) {
+                    None => continue,
+                    Some(Err(e)) => {
+                        if e.rdkafka_error_code() == Some(RDKafkaErrorCode::PartitionEOF) {
+                            break;
+                        }
+                        return Err(e.into());
+                    }
+                    Some(Ok(m)) => {
+                        if m.offset() < start || m.offset() >= high {
+                            break;
+                        }
+                        got += 1;
+                        out.push(message_to_fetched(&m));
+                    }
+                }
+            }
+        }
+
+        sort_fetched(&mut out, partition.is_some() || !multi_partition, sort_by_time);
         Ok(out)
     }
 
@@ -298,6 +371,36 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
         .build()
         .expect("tokio runtime")
         .block_on(future)
+}
+
+fn message_to_fetched<M: Message>(m: &M) -> FetchedMessage {
+    FetchedMessage {
+        partition: m.partition(),
+        offset: m.offset(),
+        timestamp_ms: m.timestamp().to_millis(),
+        key: m.key().map(|k| String::from_utf8_lossy(k).into_owned()),
+        payload: m
+            .payload()
+            .map(|p| String::from_utf8_lossy(p).into_owned()),
+        headers: message_headers(m),
+    }
+}
+
+fn sort_fetched(out: &mut [FetchedMessage], single_partition: bool, sort_by_time: bool) {
+    if single_partition {
+        out.sort_by(|a, b| a.offset.cmp(&b.offset));
+    } else if sort_by_time {
+        out.sort_by(|a, b| {
+            match (a.timestamp_ms, b.timestamp_ms) {
+                (Some(ta), Some(tb)) => ta.cmp(&tb),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
+            }
+        });
+    } else {
+        out.sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
+    }
 }
 
 fn message_headers<M: Message>(m: &M) -> Vec<(String, String)> {

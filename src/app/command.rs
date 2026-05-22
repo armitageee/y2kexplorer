@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::config::AppConfig;
+use crate::config::{clamp_live_poll_secs, AppConfig};
 
 impl App {
     pub fn execute_command(&mut self, line: &str) {
@@ -30,12 +30,34 @@ impl App {
                     self.status = "usage: :limit <N>  (10–10000)".into();
                 }
             }
+            "poll" => {
+                if let Some(n) = parts.next() {
+                    match n.parse::<u64>() {
+                        Ok(secs) => {
+                            let secs = clamp_live_poll_secs(secs);
+                            self.config.defaults.live_poll_secs = secs;
+                            self.last_live_poll = None;
+                            match self.config.save() {
+                                Ok(()) => self.status = format!("live poll interval → {secs}s (saved)"),
+                                Err(e) => {
+                                    self.status =
+                                        format!("live poll interval → {secs}s (not saved: {e:#})")
+                                }
+                            }
+                        }
+                        _ => self.status = "poll must be seconds (1–30)".into(),
+                    }
+                } else {
+                    let secs = clamp_live_poll_secs(self.config.defaults.live_poll_secs);
+                    self.status = format!("live poll interval: {secs}s  (:poll <1-30>)");
+                }
+            }
             "help" | "h" | "?" => {
                 let cfg = AppConfig::config_path()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "?".into());
                 self.status = format!(
-                    "config: {cfg}  |  :context <name>  :clusters  :limit <N>  :help  (alias: ctx)"
+                    "config: {cfg}  |  :context <name>  :clusters  :limit <N>  :poll <sec>  :help"
                 );
             }
             _ => {

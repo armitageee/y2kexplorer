@@ -99,7 +99,10 @@ y2k --cluster secure    # кластер из [clusters.<name>]
 | `+` / `-` | — | лимит ±50 (10–10000, в config) |
 | `l` | — | ввод лимита |
 | `s` | — | сортировка time / offset |
+| `f` | — | live follow (poll новых сообщений) |
+| `[` / `]` | — | интервал live-poll ±1 с (1–30, в config) |
 | `:limit N` | — | лимит сообщений |
+| `:poll N` | — | интервал live-poll (секунды) |
 | `Tab` | в модалке — следующее поле | |
 | `:` | command (`context`, `clusters`) | command |
 | `Esc` | назад / закрыть модалку | назад |

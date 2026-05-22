@@ -53,6 +53,8 @@ fn main() -> Result<()> {
                 application.on_worker_msg(msg);
             }
 
+            application.tick();
+
             terminal.draw(|frame| application.render(frame))?;
 
             if event::poll(tick)? {
