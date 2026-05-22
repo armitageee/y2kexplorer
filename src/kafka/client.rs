@@ -539,6 +539,7 @@ mod tests {
     use crate::config::AuthConfig;
 
     #[test]
+    #[ignore = "requires local Kafka: docker compose up -d"]
     fn fetch_messages_from_local_orders() {
         let cluster = ClusterConfig {
             brokers: vec!["localhost:9092".into()],

@@ -1,0 +1,162 @@
+# Release: сборка бинарников по тегу v* и публикация GitHub Release.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-release:
+    name: release (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: --all-features
+            deps: linux
+            archive: tar.gz
+          - name: linux-aarch64
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            features: --all-features
+            deps: linux-cross
+            archive: tar.gz
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            features: --all-features
+            deps: macos
+            archive: tar.gz
+          - name: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            features: --all-features
+            deps: macos
+            archive: tar.gz
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: --no-default-features
+            deps: windows
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install dependencies (Linux)
+        if: matrix.deps == 'linux' || matrix.deps == 'linux-cross'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake pkg-config libssl-dev libsasl2-dev zlib1g-dev \
+            libzstd-dev liblz4-dev
+          if [ "${{ matrix.deps }}" = "linux-cross" ]; then
+            sudo apt-get install -y --no-install-recommends \
+              gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
+
+      - name: Install dependencies (macOS)
+        if: matrix.deps == 'macos'
+        run: |
+          brew install cmake pkg-config openssl@3 cyrus-sasl krb5
+          echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix cyrus-sasl)/lib/pkgconfig:$(brew --prefix krb5)/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl@3);$(brew --prefix cyrus-sasl);$(brew --prefix krb5)" >> "$GITHUB_ENV"
+
+      - name: Install dependencies (Windows)
+        if: matrix.deps == 'windows'
+        run: |
+          choco install cmake openssl --no-progress -y
+          echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $env:GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=C:\Program Files\OpenSSL\lib" >> $env:GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=C:\Program Files\OpenSSL\include" >> $env:GITHUB_ENV
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build
+        if: matrix.deps != 'linux-cross'
+        run: |
+          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
+            --target ${{ matrix.target }}
+
+      - name: Build (cross aarch64)
+        if: matrix.deps == 'linux-cross'
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+        run: |
+          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
+            --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          TARGET="${{ matrix.target }}"
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p "y2kexplorer-${VERSION}-${TARGET}"
+          cp "target/${TARGET}/release/y2k" "y2kexplorer-${VERSION}-${TARGET}/"
+          cp "target/${TARGET}/release/y2k-probe" "y2kexplorer-${VERSION}-${TARGET}/"
+          cp README.md config.example.toml "y2kexplorer-${VERSION}-${TARGET}/"
+          chmod +x "y2kexplorer-${VERSION}-${TARGET}/y2k" "y2kexplorer-${VERSION}-${TARGET}/y2k-probe"
+          tar -czvf "y2kexplorer-${VERSION}-${TARGET}.tar.gz" "y2kexplorer-${VERSION}-${TARGET}"
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $target = "${{ matrix.target }}"
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $dir = "y2kexplorer-$version-$target"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item "target\$target\release\y2k.exe" "$dir\"
+          Copy-Item "target\$target\release\y2k-probe.exe" "$dir\"
+          Copy-Item README.md, config.example.toml "$dir\"
+          Compress-Archive -Path $dir -DestinationPath "y2kexplorer-$version-$target.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            y2kexplorer-*.tar.gz
+            y2kexplorer-*.zip
+
+  github-release:
+    name: publish GitHub Release
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip

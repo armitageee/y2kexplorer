@@ -6,6 +6,11 @@ description = "Terminal UI for Apache Kafka clusters"
 license = "MIT"
 readme = "README.md"
 
+[features]
+default = ["gssapi"]
+# Kerberos (GSSAPI) — Linux/macOS; на Windows CI собирает `--no-default-features`.
+gssapi = ["rdkafka/gssapi"]
+
 [lib]
 name = "y2kexplorer"
 path = "src/lib.rs"
@@ -25,7 +30,6 @@ rdkafka = { version = "0.38", default-features = false, features = [
     "cmake-build",
     "ssl",
     "sasl",
-    "gssapi",
     "tokio",
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }

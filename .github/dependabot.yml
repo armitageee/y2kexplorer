@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      production:
+        patterns: ["*"]
+        exclude-patterns:
+          - "ratatui"
+          - "rdkafka"
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

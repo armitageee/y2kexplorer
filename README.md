@@ -52,6 +52,31 @@ cargo run --release
 
 Остановка: `docker compose down` (данные не сохраняются между пересозданиями volume нет).
 
+## CI/CD (GitHub Actions)
+
+| Workflow | Триггер | Что делает |
+|----------|---------|------------|
+| [CI](.github/workflows/ci.yml) | push/PR в `main`, `master`, `develop` | `fmt`, `clippy`, `test`, сборка на 5 платформах |
+| [Release](.github/workflows/release.yml) | тег `v*` (например `v0.1.0`) | release-артефакты в GitHub Releases |
+
+**Платформы сборки:** `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`, `windows-x86_64`.
+
+- Linux/macOS: полный функционал (SASL + SSL + **Kerberos/GSSAPI**, feature `gssapi`).
+- Windows: сборка `--no-default-features` (без GSSAPI; PLAIN/SCRAM/SSL). Kerberos на Windows — отдельно при необходимости.
+
+Локально как в CI (Linux):
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo build --release --locked --bin y2k --bin y2k-probe
+```
+
+Интеграционный тест Kafka (`fetch_messages_from_local_orders`) помечен `#[ignore]` — нужен `docker compose up`.
+
+Релиз: `git tag v0.1.0 && git push origin v0.1.0`.
+
 ## Сборка и запуск
 
 ```bash
