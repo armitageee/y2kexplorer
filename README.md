@@ -61,7 +61,20 @@ cargo run --release
 
 **Платформы сборки:** `linux-x86_64`, `macos-arm64` (полный функционал: SASL + SSL + Kerberos/GSSAPI).
 
+- **macOS (arm64):** артефакт self-contained — все нужные `.dylib` (`libsasl2`, `libssl`, `libcrypto`, `libkrb5`, `libcurl`…) кладутся рядом с бинарником в `lib/` и подменяются на `@executable_path/lib/...` через `dylibbundler`. Запуск возможен без brew.
+- **Linux (x86_64):** сборка на `ubuntu-22.04`, чтобы glibc/`libssl3`/`libsasl2-2` были совместимы с большинством современных дистрибутивов (Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora 36+). Системные пакеты должны быть установлены: `apt install libsasl2-2 libssl3 libkrb5-3 libcurl4`.
+
 > `linux-aarch64` и `windows-x86_64` отключены: librdkafka 2.12 + Cyrus SASL на этих платформах требуют либо ARM-runner / [`cross-rs`](https://github.com/cross-rs/cross), либо `vendored` сборки `sasl2-sys` на MSVC. Для Windows используйте WSL.
+
+### macOS: первый запуск из релиза
+
+Архив скачан из браузера → системное Gatekeeper-карантин-флажок может ругаться. Снять одной командой:
+
+```bash
+xattr -dr com.apple.quarantine ./y2kexplorer-*-aarch64-apple-darwin
+cd y2kexplorer-*-aarch64-apple-darwin
+./y2k --help
+```
 
 Локально как в CI (Linux):
 
