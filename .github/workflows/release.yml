@@ -25,25 +25,13 @@ jobs:
             target: x86_64-unknown-linux-gnu
             features: --all-features
             deps: linux
-            archive: tar.gz
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
             features: --all-features
             deps: macos
-            archive: tar.gz
-          - name: macos-x86_64
-            os: macos-13
-            target: x86_64-apple-darwin
-            features: --all-features
-            deps: macos
-            archive: tar.gz
-          - name: windows-x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            features: --no-default-features
-            deps: windows
-            archive: zip
+          # Windows исключён: librdkafka + Cyrus SASL на MSVC требуют vendored
+          # сборки sasl2-sys, что хрупко; без Kerberos смысл TUI для CRPT теряется.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -67,14 +55,6 @@ jobs:
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix cyrus-sasl)/lib/pkgconfig:$(brew --prefix krb5)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl@3);$(brew --prefix cyrus-sasl);$(brew --prefix krb5)" >> "$GITHUB_ENV"
 
-      - name: Install dependencies (Windows)
-        if: matrix.deps == 'windows'
-        run: |
-          choco install cmake openssl --no-progress -y
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $env:GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=C:\Program Files\OpenSSL\lib" >> $env:GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=C:\Program Files\OpenSSL\include" >> $env:GITHUB_ENV
-
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-${{ matrix.target }}
@@ -82,17 +62,10 @@ jobs:
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
-      - name: Build (Unix)
-        if: matrix.deps != 'windows'
+      - name: Build
         run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
 
-      - name: Build (Windows)
-        if: matrix.deps == 'windows'
-        shell: pwsh
-        run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
-
-      - name: Package (Unix)
-        if: matrix.archive == 'tar.gz'
+      - name: Package
         run: |
           TARGET="${{ matrix.target }}"
           VERSION="${GITHUB_REF_NAME#v}"
@@ -103,25 +76,10 @@ jobs:
           chmod +x "y2kexplorer-${VERSION}-${TARGET}/y2k" "y2kexplorer-${VERSION}-${TARGET}/y2k-probe"
           tar -czvf "y2kexplorer-${VERSION}-${TARGET}.tar.gz" "y2kexplorer-${VERSION}-${TARGET}"
 
-      - name: Package (Windows)
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $target = "${{ matrix.target }}"
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          $dir = "y2kexplorer-$version-$target"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          Copy-Item "target\$target\release\y2k.exe" "$dir\"
-          Copy-Item "target\$target\release\y2k-probe.exe" "$dir\"
-          Copy-Item README.md, config.example.toml "$dir\"
-          Compress-Archive -Path $dir -DestinationPath "y2kexplorer-$version-$target.zip"
-
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}
-          path: |
-            y2kexplorer-*.tar.gz
-            y2kexplorer-*.zip
+          path: y2kexplorer-*.tar.gz
 
   github-release:
     name: publish GitHub Release
@@ -140,6 +98,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            artifacts/**/*.tar.gz
-            artifacts/**/*.zip
+          files: artifacts/**/*.tar.gz

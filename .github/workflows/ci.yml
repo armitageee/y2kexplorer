@@ -85,17 +85,9 @@ jobs:
             target: aarch64-apple-darwin
             features: --all-features
             deps: macos
-          - name: macos-x86_64
-            os: macos-13
-            target: x86_64-apple-darwin
-            features: --all-features
-            deps: macos
-          - name: windows-x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            # GSSAPI/Kerberos на Windows в CI не собираем (SASL/SSL достаточно для smoke build).
-            features: --no-default-features
-            deps: windows
+          # Windows исключён: librdkafka + Cyrus SASL на MSVC требуют vendored
+          # сборки sasl2-sys, что хрупко; без Kerberos смысл TUI для CRPT теряется.
+          # Windows-пользователи могут запускать через WSL/Docker.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -119,14 +111,6 @@ jobs:
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix cyrus-sasl)/lib/pkgconfig:$(brew --prefix krb5)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl@3);$(brew --prefix cyrus-sasl);$(brew --prefix krb5)" >> "$GITHUB_ENV"
 
-      - name: Install dependencies (Windows)
-        if: matrix.deps == 'windows'
-        run: |
-          choco install cmake openssl --no-progress -y
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $env:GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=C:\Program Files\OpenSSL\lib" >> $env:GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=C:\Program Files\OpenSSL\include" >> $env:GITHUB_ENV
-
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build-${{ matrix.target }}
@@ -134,17 +118,10 @@ jobs:
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
-      - name: cargo build (Unix)
-        if: matrix.deps != 'windows'
+      - name: cargo build
         run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
 
-      - name: cargo build (Windows)
-        if: matrix.deps == 'windows'
-        shell: pwsh
-        run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
-
-      - name: Archive binaries (Unix)
-        if: matrix.deps != 'windows'
+      - name: Archive binaries
         run: |
           TARGET="${{ matrix.target }}"
           mkdir -p dist
@@ -153,20 +130,8 @@ jobs:
           chmod +x dist/*
           tar -czvf "y2kexplorer-${TARGET}.tar.gz" -C dist .
 
-      - name: Archive binaries (Windows)
-        if: matrix.deps == 'windows'
-        shell: pwsh
-        run: |
-          $target = "${{ matrix.target }}"
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target\$target\release\y2k.exe" "dist\y2k-$target.exe"
-          Copy-Item "target\$target\release\y2k-probe.exe" "dist\y2k-probe-$target.exe"
-          Compress-Archive -Path dist\* -DestinationPath "y2kexplorer-$target.zip"
-
       - uses: actions/upload-artifact@v4
         with:
           name: y2kexplorer-${{ matrix.target }}
-          path: |
-            y2kexplorer-*.tar.gz
-            y2kexplorer-*.zip
+          path: y2kexplorer-*.tar.gz
           if-no-files-found: error
