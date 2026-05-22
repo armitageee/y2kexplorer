@@ -26,12 +26,6 @@ jobs:
             features: --all-features
             deps: linux
             archive: tar.gz
-          - name: linux-aarch64
-            os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            features: --all-features
-            deps: linux-cross
-            archive: tar.gz
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
@@ -58,16 +52,12 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install dependencies (Linux)
-        if: matrix.deps == 'linux' || matrix.deps == 'linux-cross'
+        if: matrix.deps == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config libssl-dev libsasl2-dev zlib1g-dev \
-            libzstd-dev liblz4-dev
-          if [ "${{ matrix.deps }}" = "linux-cross" ]; then
-            sudo apt-get install -y --no-install-recommends \
-              gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          fi
+            libzstd-dev liblz4-dev libcurl4-openssl-dev
 
       - name: Install dependencies (macOS)
         if: matrix.deps == 'macos'
@@ -93,17 +83,6 @@ jobs:
         run: rustup target add ${{ matrix.target }}
 
       - name: Build
-        if: matrix.deps != 'linux-cross'
-        run: |
-          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
-            --target ${{ matrix.target }}
-
-      - name: Build (cross aarch64)
-        if: matrix.deps == 'linux-cross'
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
         run: |
           cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
             --target ${{ matrix.target }}

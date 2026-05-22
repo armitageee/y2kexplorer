@@ -8,8 +8,8 @@ use crate::ui::theme;
 /// `pairs`: ["key", "desc", "key2", "desc2", ...]
 pub fn draw_help(frame: &mut Frame, area: Rect, pairs: &[&str]) {
     let mut spans = Vec::new();
-    let mut iter = pairs.chunks(2);
-    while let Some(chunk) = iter.next() {
+    let iter = pairs.chunks(2);
+    for chunk in iter {
         if !spans.is_empty() {
             spans.push(Span::styled("  │  ", theme::FOOTER_HINT));
         }

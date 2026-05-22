@@ -23,7 +23,9 @@ impl App {
             "limit" => {
                 if let Some(n) = parts.next() {
                     match n.parse::<usize>() {
-                        Ok(limit) if (10..=10_000).contains(&limit) => self.set_message_limit(limit),
+                        Ok(limit) if (10..=10_000).contains(&limit) => {
+                            self.set_message_limit(limit)
+                        }
                         _ => self.status = "limit must be 10–10000".into(),
                     }
                 } else {
@@ -38,7 +40,9 @@ impl App {
                             self.config.defaults.live_poll_secs = secs;
                             self.last_live_poll = None;
                             match self.config.save() {
-                                Ok(()) => self.status = format!("live poll interval → {secs}s (saved)"),
+                                Ok(()) => {
+                                    self.status = format!("live poll interval → {secs}s (saved)")
+                                }
                                 Err(e) => {
                                     self.status =
                                         format!("live poll interval → {secs}s (not saved: {e:#})")
@@ -96,7 +100,9 @@ impl App {
         self.cluster_name = name.to_string();
         self.cluster = cluster;
         self.connection = None;
-        self.stack = vec![crate::views::ViewStack::Topics(crate::views::TopicsView::new())];
+        self.stack = vec![crate::views::ViewStack::Topics(
+            crate::views::TopicsView::new(),
+        )];
         self.show_partitions_popup = false;
         self.loading = true;
         self.status = format!("switching to {name}…");

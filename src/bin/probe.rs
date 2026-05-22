@@ -63,7 +63,10 @@ fn main() -> Result<()> {
         if let Some(k) = krb5_conf {
             println!("krb5_conf: {} (exists={})", k.display(), k.exists());
             for ca in krb5_ca_candidates(k) {
-                println!("  krb5 CA candidate: {ca} (exists={})", std::path::Path::new(&ca).exists());
+                println!(
+                    "  krb5 CA candidate: {ca} (exists={})",
+                    std::path::Path::new(&ca).exists()
+                );
             }
         }
         println!();
@@ -71,7 +74,13 @@ fn main() -> Result<()> {
     }
 
     let scenarios: Vec<(&str, TlsMode)> = vec![
-        ("current (as y2k TUI)", TlsMode { verify_hostname: true, ca: None }),
+        (
+            "current (as y2k TUI)",
+            TlsMode {
+                verify_hostname: true,
+                ca: None,
+            },
+        ),
         (
             "TLS: no hostname verify",
             TlsMode {
@@ -111,10 +120,8 @@ fn run_scenarios(cluster: &ClusterConfig, scenarios: &[(&str, TlsMode)]) -> Resu
 
 fn try_connect(cluster: &ClusterConfig, tls: TlsMode, ca_override: Option<&str>) -> Result<usize> {
     apply_kerberos_env(&cluster.auth);
-    let mut cfg = build_config(cluster, tls, ca_override);
-    let admin: AdminClient<DefaultClientContext> = cfg
-        .create()
-        .context("create admin client")?;
+    let cfg = build_config(cluster, tls, ca_override);
+    let admin: AdminClient<DefaultClientContext> = cfg.create().context("create admin client")?;
     let md = admin
         .inner()
         .fetch_metadata(None, Timeout::After(Duration::from_secs(30)))
@@ -140,9 +147,7 @@ fn build_config(cluster: &ClusterConfig, tls: TlsMode, ca_override: Option<&str>
         ..
     } = &cluster.auth
     {
-        let ca = ca_override
-            .map(String::from)
-            .or_else(|| ssl_ca.clone());
+        let ca = ca_override.map(String::from).or_else(|| ssl_ca.clone());
         if *use_tls {
             cfg.set("security.protocol", "SASL_SSL");
             if tls.verify_hostname {
@@ -217,4 +222,3 @@ fn test_kinit(
     println!();
     Ok(())
 }
-

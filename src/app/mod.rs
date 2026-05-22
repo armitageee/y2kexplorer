@@ -207,7 +207,12 @@ impl App {
                 }
                 self.close_modal();
             }
-            Modal::Produce { topic, key, payload, .. } => {
+            Modal::Produce {
+                topic,
+                key,
+                payload,
+                ..
+            } => {
                 if payload.trim().is_empty() {
                     self.status = "payload is required".into();
                     return;
@@ -215,7 +220,9 @@ impl App {
                 self.run_produce(topic, key, payload);
                 self.close_modal();
             }
-            Modal::CreateTopic { name, partitions, .. } => {
+            Modal::CreateTopic {
+                name, partitions, ..
+            } => {
                 let name = name.trim().to_string();
                 if name.is_empty() {
                     self.status = "topic name is required".into();
@@ -289,7 +296,9 @@ impl App {
                 }
             }
             KeyCode::Char('d') => {
-                if let Some(topic) = self.selected_topic_name() {
+                if let ViewStack::Messages(v) = self.current_mut() {
+                    v.scroll_detail_down(3);
+                } else if let Some(topic) = self.selected_topic_name() {
                     if topic.starts_with('_') {
                         self.status = "cannot delete internal topics".into();
                     } else {
@@ -386,13 +395,6 @@ impl App {
                 if matches!(self.current(), ViewStack::Messages(_)) {
                     if let ViewStack::Messages(v) = self.current_mut() {
                         v.scroll_detail_up(3);
-                    }
-                }
-            }
-            KeyCode::Char('d') => {
-                if matches!(self.current(), ViewStack::Messages(_)) {
-                    if let ViewStack::Messages(v) = self.current_mut() {
-                        v.scroll_detail_down(3);
                     }
                 }
             }
@@ -630,7 +632,9 @@ impl App {
     fn show_partitions(&mut self) {
         let topic = self.selected_topic_name();
         let Some(topic) = topic else { return };
-        let Some(conn) = self.connection.as_ref() else { return };
+        let Some(conn) = self.connection.as_ref() else {
+            return;
+        };
 
         self.loading = true;
         self.status = format!("loading partitions for {topic}…");
@@ -660,8 +664,7 @@ impl App {
             WorkerMsg::Topics(Err(e)) => self.status = format!("topics error: {e:#}"),
             WorkerMsg::Messages { topic, result } => match result {
                 Ok(msgs) => {
-                    let poll_secs =
-                        clamp_live_poll_secs(self.config.defaults.live_poll_secs);
+                    let poll_secs = clamp_live_poll_secs(self.config.defaults.live_poll_secs);
                     if let ViewStack::Messages(v) = self.current_mut() {
                         if v.topic == topic {
                             let count = msgs.len();
@@ -734,12 +737,12 @@ impl App {
         let chunks = layout_main(area, show_help);
 
         match self.current_mut() {
-            ViewStack::Topics(v) => {
-                v.render(frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading)
-            }
-            ViewStack::Messages(v) => {
-                v.render(frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading)
-            }
+            ViewStack::Topics(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::Messages(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
         }
 
         if let Some(ref modal) = self.modal {
@@ -753,9 +756,9 @@ impl App {
     }
 
     fn render_partitions_popup(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        use crate::ui::theme;
         use ratatui::layout::{Constraint, Layout};
         use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-        use crate::ui::theme;
 
         frame.render_widget(Clear, area);
         let popup = Layout::vertical([Constraint::Min(5)]).split(area);

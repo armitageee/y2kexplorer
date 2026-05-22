@@ -6,9 +6,9 @@ use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::client::DefaultClientContext;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::error::RDKafkaErrorCode;
 use rdkafka::message::{Headers, Message};
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
-use rdkafka::error::RDKafkaErrorCode;
 use rdkafka::util::Timeout;
 use rdkafka::{Offset, TopicPartitionList};
 
@@ -34,6 +34,7 @@ pub struct PartitionInfo {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // зарезервировано под future view со списком consumer groups
 pub struct ConsumerGroupInfo {
     pub id: String,
     pub state: String,
@@ -82,7 +83,10 @@ impl ClusterConnection {
             .context("fetch cluster metadata")?;
 
         let consumer: BaseConsumer = base_config(&self.cluster)
-            .set("group.id", format!("y2kexplorer-meta-{}", std::process::id()))
+            .set(
+                "group.id",
+                format!("y2kexplorer-meta-{}", std::process::id()),
+            )
             .create()
             .context("create metadata consumer")?;
 
@@ -118,10 +122,10 @@ impl ClusterConnection {
     }
 
     pub fn topic_partitions(&self, topic: &str) -> Result<Vec<PartitionInfo>> {
-        let metadata = self.admin.inner().fetch_metadata(
-            Some(topic),
-            Timeout::After(Duration::from_secs(10)),
-        )?;
+        let metadata = self
+            .admin
+            .inner()
+            .fetch_metadata(Some(topic), Timeout::After(Duration::from_secs(10)))?;
 
         let meta_topic = metadata
             .topics()
@@ -153,8 +157,8 @@ impl ClusterConnection {
             .create()
             .context("create kafka consumer")?;
 
-        let metadata = consumer
-            .fetch_metadata(Some(topic), Timeout::After(Duration::from_secs(10)))?;
+        let metadata =
+            consumer.fetch_metadata(Some(topic), Timeout::After(Duration::from_secs(10)))?;
         let meta_topic = metadata
             .topics()
             .iter()
@@ -221,7 +225,11 @@ impl ClusterConnection {
             }
         }
 
-        sort_fetched(&mut out, partition.is_some() || !multi_partition, sort_by_time);
+        sort_fetched(
+            &mut out,
+            partition.is_some() || !multi_partition,
+            sort_by_time,
+        );
         out.truncate(limit);
         Ok(out)
     }
@@ -244,8 +252,8 @@ impl ClusterConnection {
             .create()
             .context("create live consumer")?;
 
-        let metadata = consumer
-            .fetch_metadata(Some(topic), Timeout::After(Duration::from_secs(5)))?;
+        let metadata =
+            consumer.fetch_metadata(Some(topic), Timeout::After(Duration::from_secs(5)))?;
         let meta_topic = metadata
             .topics()
             .iter()
@@ -313,13 +321,18 @@ impl ClusterConnection {
             }
         }
 
-        sort_fetched(&mut out, partition.is_some() || !multi_partition, sort_by_time);
+        sort_fetched(
+            &mut out,
+            partition.is_some() || !multi_partition,
+            sort_by_time,
+        );
         Ok(out)
     }
 
     pub fn create_topic(&self, name: &str, partitions: i32) -> Result<()> {
         let topic = NewTopic::new(name, partitions, TopicReplication::Fixed(1));
-        let opts = AdminOptions::new().operation_timeout(Some(Timeout::After(Duration::from_secs(30))));
+        let opts =
+            AdminOptions::new().operation_timeout(Some(Timeout::After(Duration::from_secs(30))));
         let results = block_on(self.admin.create_topics(&[topic], &opts))?;
         for r in results {
             r.map_err(|(name, code)| anyhow::anyhow!("create topic '{name}': {code:?}"))?;
@@ -328,7 +341,8 @@ impl ClusterConnection {
     }
 
     pub fn delete_topic(&self, name: &str) -> Result<()> {
-        let opts = AdminOptions::new().operation_timeout(Some(Timeout::After(Duration::from_secs(30))));
+        let opts =
+            AdminOptions::new().operation_timeout(Some(Timeout::After(Duration::from_secs(30))));
         let results = block_on(self.admin.delete_topics(&[name], &opts))?;
         for r in results {
             r.map_err(|(name, code)| anyhow::anyhow!("delete topic '{name}': {code:?}"))?;
@@ -371,27 +385,23 @@ fn message_to_fetched<M: Message>(m: &M) -> FetchedMessage {
         offset: m.offset(),
         timestamp_ms: m.timestamp().to_millis(),
         key: m.key().map(|k| String::from_utf8_lossy(k).into_owned()),
-        payload: m
-            .payload()
-            .map(|p| String::from_utf8_lossy(p).into_owned()),
+        payload: m.payload().map(|p| String::from_utf8_lossy(p).into_owned()),
         headers: message_headers(m),
     }
 }
 
 fn sort_fetched(out: &mut [FetchedMessage], single_partition: bool, sort_by_time: bool) {
     if single_partition {
-        out.sort_by(|a, b| a.offset.cmp(&b.offset));
+        out.sort_by_key(|m| m.offset);
     } else if sort_by_time {
-        out.sort_by(|a, b| {
-            match (a.timestamp_ms, b.timestamp_ms) {
-                (Some(ta), Some(tb)) => ta.cmp(&tb),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
-            }
+        out.sort_by(|a, b| match (a.timestamp_ms, b.timestamp_ms) {
+            (Some(ta), Some(tb)) => ta.cmp(&tb),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
         });
     } else {
-        out.sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
+        out.sort_by_key(|m| (m.partition, m.offset));
     }
 }
 
@@ -435,9 +445,16 @@ fn base_config(cluster: &ClusterConfig) -> ClientConfig {
 
     match &cluster.auth {
         AuthConfig::None => {}
-        AuthConfig::SaslPlain { username, password, tls } => {
+        AuthConfig::SaslPlain {
+            username,
+            password,
+            tls,
+        } => {
             apply_tls(&mut cfg, *tls, None, true);
-            cfg.set("security.protocol", if *tls { "SASL_SSL" } else { "SASL_PLAINTEXT" });
+            cfg.set(
+                "security.protocol",
+                if *tls { "SASL_SSL" } else { "SASL_PLAINTEXT" },
+            );
             cfg.set("sasl.mechanism", "PLAIN");
             cfg.set("sasl.username", username);
             cfg.set("sasl.password", password);
@@ -449,7 +466,10 @@ fn base_config(cluster: &ClusterConfig) -> ClientConfig {
             tls,
         } => {
             apply_tls(&mut cfg, *tls, None, true);
-            cfg.set("security.protocol", if *tls { "SASL_SSL" } else { "SASL_PLAINTEXT" });
+            cfg.set(
+                "security.protocol",
+                if *tls { "SASL_SSL" } else { "SASL_PLAINTEXT" },
+            );
             let mech = match mechanism {
                 ScramMechanism::ScramSha256 => "SCRAM-SHA-256",
                 ScramMechanism::ScramSha512 => "SCRAM-SHA-512",
@@ -488,13 +508,11 @@ fn base_config(cluster: &ClusterConfig) -> ClientConfig {
             ..
         } => {
             let ca = resolve_kerberos_ssl_ca(&cluster.auth);
-            apply_tls(
-                &mut cfg,
-                *tls,
-                ca.as_deref(),
-                *tls_verify_hostname,
+            apply_tls(&mut cfg, *tls, ca.as_deref(), *tls_verify_hostname);
+            cfg.set(
+                "security.protocol",
+                if *tls { "SASL_SSL" } else { "SASL_PLAINTEXT" },
             );
-            cfg.set("security.protocol", if *tls { "SASL_SSL" } else { "SASL_PLAINTEXT" });
             cfg.set("sasl.mechanism", "GSSAPI");
             cfg.set("sasl.kerberos.keytab", keytab.display().to_string());
             cfg.set("sasl.kerberos.principal", principal);
@@ -512,12 +530,7 @@ fn base_config(cluster: &ClusterConfig) -> ClientConfig {
     cfg
 }
 
-fn apply_tls(
-    cfg: &mut ClientConfig,
-    tls: bool,
-    ca_location: Option<&str>,
-    verify_hostname: bool,
-) {
+fn apply_tls(cfg: &mut ClientConfig, tls: bool, ca_location: Option<&str>, verify_hostname: bool) {
     if !tls {
         return;
     }
@@ -550,9 +563,6 @@ mod tests {
         let msgs = conn
             .fetch_messages("orders", None, 10, true, true)
             .expect("fetch tail");
-        assert!(
-            !msgs.is_empty(),
-            "expected messages in orders, got none"
-        );
+        assert!(!msgs.is_empty(), "expected messages in orders, got none");
     }
 }

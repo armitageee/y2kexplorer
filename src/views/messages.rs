@@ -12,38 +12,67 @@ use crate::kafka::FetchedMessage;
 use crate::ui::{draw_help, draw_status, payload, theme};
 
 const HELP: &[&str] = &[
-    "j/k", "nav",
-    ":", "command",
-    "n", "produce",
-    "b", "tail",
-    "t", "head",
-    "+/-", "limit ±50",
-    "l", "set limit",
-    "p", "partition",
-    "i", "partitions info",
-    "s", "sort time/offset",
-    "f", "live follow",
-    "[/]", "poll ±1s",
-    "o", "toggle JSON pretty",
-    "y", "copy message",
-    "u/d", "scroll detail",
-    "r", "reload",
-    "Esc", "back",
-    "?", "help",
-    "q", "quit",
+    "j/k",
+    "nav",
+    ":",
+    "command",
+    "n",
+    "produce",
+    "b",
+    "tail",
+    "t",
+    "head",
+    "+/-",
+    "limit ±50",
+    "l",
+    "set limit",
+    "p",
+    "partition",
+    "i",
+    "partitions info",
+    "s",
+    "sort time/offset",
+    "f",
+    "live follow",
+    "[/]",
+    "poll ±1s",
+    "o",
+    "toggle JSON pretty",
+    "y",
+    "copy message",
+    "u/d",
+    "scroll detail",
+    "r",
+    "reload",
+    "Esc",
+    "back",
+    "?",
+    "help",
+    "q",
+    "quit",
 ];
 
 const HINT: &[&str] = &[
-    ":", "context",
-    "n", "produce",
-    "b", "tail",
-    "t", "head",
-    "p", "partition",
-    "f", "live",
-    "y", "copy",
-    "s", "sort",
-    "Esc", "back",
-    "?", "help",
+    ":",
+    "context",
+    "n",
+    "produce",
+    "b",
+    "tail",
+    "t",
+    "head",
+    "p",
+    "partition",
+    "f",
+    "live",
+    "y",
+    "copy",
+    "s",
+    "sort",
+    "Esc",
+    "back",
+    "?",
+    "help",
 ];
 
 pub struct MessagesView {
@@ -149,9 +178,9 @@ impl MessagesView {
         }
         let before = self.messages.len();
         self.messages.extend(new);
+        self.messages.sort_by_key(|a| (a.partition, a.offset));
         self.messages
-            .sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
-        self.messages.dedup_by(|a, b| a.partition == b.partition && a.offset == b.offset);
+            .dedup_by(|a, b| a.partition == b.partition && a.offset == b.offset);
         sort_messages_in_place(&mut self.messages, single_partition, sort_by_time);
         if self.messages.len() > limit {
             let drop = self.messages.len() - limit;
@@ -223,6 +252,7 @@ impl MessagesView {
         self.detail_scroll = 0;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         frame: &mut Frame,
@@ -243,7 +273,7 @@ impl MessagesView {
             .map(|m| {
                 let ts = m
                     .timestamp_ms
-                    .map(|t| format_timestamp(t))
+                    .map(format_timestamp)
                     .unwrap_or_else(|| "-".into());
                 let key = m
                     .key
@@ -286,15 +316,13 @@ impl MessagesView {
 }
 
 fn format_message_detail(m: &FetchedMessage, pretty_json: bool) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("partition ", theme::KEY),
-            Span::raw(m.partition.to_string()),
-            Span::raw("  "),
-            Span::styled("offset ", theme::KEY),
-            Span::raw(m.offset.to_string()),
-        ]),
-    ];
+    let mut lines = vec![Line::from(vec![
+        Span::styled("partition ", theme::KEY),
+        Span::raw(m.partition.to_string()),
+        Span::raw("  "),
+        Span::styled("offset ", theme::KEY),
+        Span::raw(m.offset.to_string()),
+    ])];
     if let Some(ts) = m.timestamp_ms {
         lines.push(Line::from(vec![
             Span::styled("timestamp ", theme::KEY),
@@ -375,18 +403,16 @@ fn sort_messages_in_place(
     sort_by_time: bool,
 ) {
     if single_partition {
-        messages.sort_by(|a, b| a.offset.cmp(&b.offset));
+        messages.sort_by_key(|a| a.offset);
     } else if sort_by_time {
-        messages.sort_by(|a, b| {
-            match (a.timestamp_ms, b.timestamp_ms) {
-                (Some(ta), Some(tb)) => ta.cmp(&tb),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
-            }
+        messages.sort_by(|a, b| match (a.timestamp_ms, b.timestamp_ms) {
+            (Some(ta), Some(tb)) => ta.cmp(&tb),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
         });
     } else {
-        messages.sort_by(|a, b| (a.partition, a.offset).cmp(&(b.partition, b.offset)));
+        messages.sort_by_key(|a| (a.partition, a.offset));
     }
 }
 

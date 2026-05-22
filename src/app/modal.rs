@@ -27,8 +27,12 @@ pub enum Modal {
         partitions: String,
         field: ModalField,
     },
-    DeleteConfirm { topic: String },
-    MessageLimit { value: String },
+    DeleteConfirm {
+        topic: String,
+    },
+    MessageLimit {
+        value: String,
+    },
 }
 
 impl Modal {
@@ -64,11 +68,20 @@ impl Modal {
     pub fn push_char(&mut self, c: char) {
         match self {
             Modal::Filter | Modal::Command => {}
-            Modal::Produce { key, payload, field, .. } => match field {
+            Modal::Produce {
+                key,
+                payload,
+                field,
+                ..
+            } => match field {
                 ModalField::First => key.push(c),
                 _ => payload.push(c),
             },
-            Modal::CreateTopic { name, partitions, field } => match field {
+            Modal::CreateTopic {
+                name,
+                partitions,
+                field,
+            } => match field {
                 ModalField::First => name.push(c),
                 _ => partitions.push(c),
             },
@@ -80,7 +93,12 @@ impl Modal {
     pub fn backspace(&mut self) {
         match self {
             Modal::Filter | Modal::Command => {}
-            Modal::Produce { key, payload, field, .. } => match field {
+            Modal::Produce {
+                key,
+                payload,
+                field,
+                ..
+            } => match field {
                 ModalField::First => {
                     key.pop();
                 }
@@ -88,7 +106,11 @@ impl Modal {
                     payload.pop();
                 }
             },
-            Modal::CreateTopic { name, partitions, field } => match field {
+            Modal::CreateTopic {
+                name,
+                partitions,
+                field,
+            } => match field {
                 ModalField::First => {
                     name.pop();
                 }
@@ -109,7 +131,7 @@ impl Modal {
 }
 
 pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Option<&str>) {
-    let popup_w = area.width.min(72).max(40);
+    let popup_w = area.width.clamp(40, 72);
     let popup_h = match modal {
         Modal::DeleteConfirm { .. } => 7,
         Modal::Produce { .. } => 11,
@@ -153,7 +175,12 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
                 )),
             ]
         }
-        Modal::Produce { topic, key, payload, field } => {
+        Modal::Produce {
+            topic,
+            key,
+            payload,
+            field,
+        } => {
             let mut out = vec![Line::from(vec![
                 Span::styled("topic: ", theme::MODAL_LABEL),
                 Span::styled(topic.as_str(), theme::VALUE),
@@ -167,7 +194,11 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
             )));
             out
         }
-        Modal::CreateTopic { name, partitions, field } => {
+        Modal::CreateTopic {
+            name,
+            partitions,
+            field,
+        } => {
             vec![
                 field_line("name", name, *field == ModalField::First),
                 field_line("partitions", partitions, *field != ModalField::First),
@@ -226,7 +257,11 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 }
 
 pub fn footer_rows(show_full_help: bool) -> u16 {
-    if show_full_help { 3 } else { 2 }
+    if show_full_help {
+        3
+    } else {
+        2
+    }
 }
 
 pub fn layout_main(area: Rect, show_full_help: bool) -> [Rect; 3] {

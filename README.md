@@ -59,7 +59,9 @@ cargo run --release
 | [CI](.github/workflows/ci.yml) | push/PR в `main`, `master`, `develop` | `fmt`, `clippy`, `test`, сборка на 5 платформах |
 | [Release](.github/workflows/release.yml) | тег `v*` (например `v0.1.0`) | release-артефакты в GitHub Releases |
 
-**Платформы сборки:** `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`, `windows-x86_64`.
+**Платформы сборки:** `linux-x86_64`, `macos-arm64`, `macos-x86_64`, `windows-x86_64`.
+
+> `linux-aarch64` отключён по умолчанию — `librdkafka 2.12` тянет `libcurl/libssl/libsasl2` через cmake, и cross-сборка через `apt:arm64` ненадёжна. Для ARM-Linux собирайте на ARM-runner или через [`cross-rs`](https://github.com/cross-rs/cross).
 
 - Linux/macOS: полный функционал (SASL + SSL + **Kerberos/GSSAPI**, feature `gssapi`).
 - Windows: сборка `--no-default-features` (без GSSAPI; PLAIN/SCRAM/SSL). Kerberos на Windows — отдельно при необходимости.

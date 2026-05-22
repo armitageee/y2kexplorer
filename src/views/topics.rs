@@ -5,26 +5,32 @@ use crate::kafka::TopicInfo;
 use crate::ui::{draw_help, draw_status, TableView};
 
 const HELP: &[&str] = &[
-    "j/k", "nav",
-    ":", "command",
-    "/", "filter",
-    "Enter", "messages",
-    "n", "produce",
-    "c", "create",
-    "d", "delete",
-    "p", "partitions",
-    "r", "refresh",
-    "?", "help",
-    "q", "quit",
+    "j/k",
+    "nav",
+    ":",
+    "command",
+    "/",
+    "filter",
+    "Enter",
+    "messages",
+    "n",
+    "produce",
+    "c",
+    "create",
+    "d",
+    "delete",
+    "p",
+    "partitions",
+    "r",
+    "refresh",
+    "?",
+    "help",
+    "q",
+    "quit",
 ];
 
 const HINT: &[&str] = &[
-    ":", "context",
-    "Enter", "open",
-    "n", "produce",
-    "c", "create",
-    "d", "delete",
-    "/", "filter",
+    ":", "context", "Enter", "open", "n", "produce", "c", "create", "d", "delete", "/", "filter",
     "?", "help",
 ];
 
@@ -74,6 +80,7 @@ impl TopicsView {
         row.first().map(String::as_str)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         frame: &mut Frame,
