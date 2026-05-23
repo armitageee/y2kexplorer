@@ -106,7 +106,7 @@ jobs:
 
           tar -czvf "${DIR}.tar.gz" "${DIR}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
           path: y2kexplorer-*.tar.gz
