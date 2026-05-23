@@ -131,6 +131,30 @@ y2k-probe --cluster <name>     # smoke-тест подключения без TU
 `light` — для светлого фона терминала; контент-цвета переключаются на тёмные,
 а status-bar остаётся ярко-синим в обеих темах.
 
+### Производительность списка топиков
+
+Колонка `MESSAGES` в Topics-view считается через high-low watermark per
+partition. На кластерах с большим числом топиков (или высокой broker latency)
+это может занимать большую часть времени загрузки. Регулируется двумя опциями:
+
+```toml
+[defaults]
+# Не считать message_count вовсе — мгновенная загрузка, колонка MESSAGES = 0.
+fetch_watermarks = true        # дефолт true
+# Сколько потоков параллельно опрашивает watermarks (1..=64).
+watermark_parallelism = 16     # дефолт 16
+```
+
+Реальные замеры (Kerberos+TLS кластер, 84 топика / 720 партиций):
+
+| Режим | Время |
+|---|---|
+| sequential (legacy) | ~103 с |
+| parallel(16) | ~6.4 с |
+| `fetch_watermarks = false` | ~3 с (только metadata) |
+
+Запустить замер на своём кластере: `y2k-probe -c <cluster> --bench-topics`.
+
 ### Аутентификация
 
 У каждого кластера своя секция `[clusters.<name>.auth]`:

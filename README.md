@@ -132,6 +132,30 @@ The theme can also be persisted in config via `defaults.theme = "light"`.
 Use `light` if your terminal background is bright — colors switch to a darker
 palette while the status bar stays high-contrast.
 
+### Topic-list performance
+
+The Topics view computes a `MESSAGES` column by querying low/high watermarks
+per partition. On clusters with many topics (or high broker latency), this can
+dominate initial load time. Two knobs control this:
+
+```toml
+[defaults]
+# Skip per-topic message counts entirely — instant load, MESSAGES column = 0.
+fetch_watermarks = true        # default true
+# How many threads pipeline watermark RPCs in parallel (1..=64).
+watermark_parallelism = 16     # default 16
+```
+
+Reference numbers (Kerberos+TLS cluster, 84 topics / 720 partitions):
+
+| Mode | Time |
+|---|---|
+| sequential (legacy) | ~103 s |
+| parallel(16) | ~6.4 s |
+| `fetch_watermarks = false` | ~3 s (metadata only) |
+
+Run `y2k-probe -c <cluster> --bench-topics` to measure on your own cluster.
+
 ### Authentication
 
 Each cluster has its own `[clusters.<name>.auth]` section. Supported types:

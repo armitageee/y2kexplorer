@@ -11,8 +11,8 @@ use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
-use crate::config::{clamp_live_poll_secs, AppConfig, ClusterConfig};
-use crate::kafka::{ClusterConnection, PartitionInfo, ResetStrategy};
+use crate::config::{clamp_live_poll_secs, clamp_watermark_parallelism, AppConfig, ClusterConfig};
+use crate::kafka::{ClusterConnection, ListTopicsOptions, PartitionInfo, ResetStrategy};
 use crate::views::{GroupDetailsView, GroupsView, MessagesView, TopicsView, ViewStack};
 
 use modal::{draw_modal, layout_main, Modal, ModalField};
@@ -136,7 +136,11 @@ impl App {
     }
 
     pub fn init_connection(&mut self) {
-        match ClusterConnection::connect(&self.cluster) {
+        let opts = ListTopicsOptions {
+            fetch_watermarks: self.config.defaults.fetch_watermarks,
+            parallelism: clamp_watermark_parallelism(self.config.defaults.watermark_parallelism),
+        };
+        match ClusterConnection::connect(&self.cluster).map(|c| c.with_list_topics_options(opts)) {
             Ok(conn) => {
                 self.connection = Some(conn);
                 self.status = "connected".into();
