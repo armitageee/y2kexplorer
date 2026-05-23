@@ -11,7 +11,68 @@ Terminal UI для Apache Kafka — по духу близко к [k9s](https://
 - Метаданные партиций (Topics: `p`, Messages: `i`)
 - Аутентификация: PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) через keytab**
 
-## Требования для сборки
+## Установка
+
+### Готовые бинарники из GitHub Releases
+
+Каждый тег `v*` собирает self-contained тарбол под две платформы.
+
+#### macOS (Apple Silicon, arm64)
+
+```bash
+TAG=v0.0.2-rc        # подставить актуальный
+VER=${TAG#v}
+curl -LO "https://github.com/armitageee/y2kexplorer/releases/download/${TAG}/y2kexplorer-${VER}-aarch64-apple-darwin.tar.gz"
+tar -xzf "y2kexplorer-${VER}-aarch64-apple-darwin.tar.gz"
+cd "y2kexplorer-${VER}-aarch64-apple-darwin"
+
+# снять карантин Gatekeeper, если архив скачан через браузер
+xattr -dr com.apple.quarantine .
+
+./y2k --help
+```
+
+Все нужные `.dylib` (`libsasl2`, `libssl`, `libcrypto`, `libkrb5`, `libcurl`…) лежат в `lib/` рядом с бинарником и подгружаются через `@executable_path/lib/...`. `brew install cyrus-sasl krb5 openssl@3` **не требуется**.
+
+> Если выскочит `library load disallowed by system policy` — значит, в этом релизе CI-подпись не доехала до dylib. Подписать ad-hoc вручную:
+> ```bash
+> codesign --force --sign - lib/*.dylib
+> codesign --force --sign - y2k y2k-probe
+> ```
+
+#### Linux (x86_64)
+
+Собран на Ubuntu 22.04 (glibc 2.35), совместим с **Ubuntu 22.04+**, **Debian 12+**, **RHEL/Rocky/Alma 9+**, **Fedora 36+**, **openSUSE Leap 15.5+**, Arch.
+
+```bash
+# 1. Системные зависимости (один раз)
+sudo apt install libsasl2-2 libssl3 libkrb5-3 libcurl4   # Debian/Ubuntu
+# или
+sudo dnf install cyrus-sasl-lib openssl-libs krb5-libs libcurl  # Fedora/RHEL
+
+# 2. Скачать и запустить
+TAG=v0.0.2-rc
+VER=${TAG#v}
+curl -LO "https://github.com/armitageee/y2kexplorer/releases/download/${TAG}/y2kexplorer-${VER}-x86_64-unknown-linux-gnu.tar.gz"
+tar -xzf "y2kexplorer-${VER}-x86_64-unknown-linux-gnu.tar.gz"
+cd "y2kexplorer-${VER}-x86_64-unknown-linux-gnu"
+./y2k --help
+```
+
+> Не работает на Ubuntu 20.04 / Debian 11 / RHEL 8 / Alpine (старая glibc или musl). Для них собирайте локально из исходников.
+
+### Конфигурация после установки
+
+```bash
+mkdir -p ~/.config/y2kexplorer
+cp config.example.toml ~/.config/y2kexplorer/config.toml
+$EDITOR ~/.config/y2kexplorer/config.toml
+./y2k                            # дефолтный кластер
+./y2k --cluster <name>           # из [clusters.<name>]
+./y2k-probe --cluster <name>     # smoke-тест подключения без TUI
+```
+
+## Требования для сборки из исходников
 
 - Rust 1.75+
 - CMake, zlib (для сборки librdkafka через `rdkafka/cmake-build`)
@@ -19,10 +80,10 @@ Terminal UI для Apache Kafka — по духу близко к [k9s](https://
 
 ```bash
 # macOS (Homebrew)
-brew install cmake openssl
+brew install cmake openssl@3 cyrus-sasl krb5
 
 # Debian/Ubuntu
-sudo apt install cmake libsasl2-dev libssl-dev pkg-config
+sudo apt install cmake pkg-config libsasl2-dev libssl-dev libkrb5-dev libcurl4-openssl-dev
 ```
 
 ## Тестовый кластер (Docker)
@@ -66,15 +127,7 @@ cargo run --release
 
 > `linux-aarch64` и `windows-x86_64` отключены: librdkafka 2.12 + Cyrus SASL на этих платформах требуют либо ARM-runner / [`cross-rs`](https://github.com/cross-rs/cross), либо `vendored` сборки `sasl2-sys` на MSVC. Для Windows используйте WSL.
 
-### macOS: первый запуск из релиза
-
-Архив скачан из браузера → системное Gatekeeper-карантин-флажок может ругаться. Снять одной командой:
-
-```bash
-xattr -dr com.apple.quarantine ./y2kexplorer-*-aarch64-apple-darwin
-cd y2kexplorer-*-aarch64-apple-darwin
-./y2k --help
-```
+> Инструкция по установке готовых бинарников и снятию карантина macOS — см. секцию [Установка](#установка) выше.
 
 Локально как в CI (Linux):
 

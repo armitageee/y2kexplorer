@@ -21,9 +21,6 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            # ubuntu-22.04 — старее glibc/libssl: бинарник запустится на Ubuntu 22.04+,
-            # Debian 12+, RHEL 9+, Fedora 36+. ubuntu-latest сейчас 24.04 → glibc 2.39
-            # и binary не работает на 22.04.
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             features: --all-features
@@ -33,8 +30,6 @@ jobs:
             target: aarch64-apple-darwin
             features: --all-features
             deps: macos
-          # Windows исключён: librdkafka + Cyrus SASL на MSVC требуют vendored
-          # сборки sasl2-sys, что хрупко; без Kerberos смысл TUI для CRPT теряется.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -89,8 +84,21 @@ jobs:
             ( cd "${DIR}" && dylibbundler -of -b \
               -x ./y2k -x ./y2k-probe \
               -d ./lib -p '@executable_path/lib/' )
-            echo "Bundled dylibs:"
-            otool -L "${DIR}/y2k" || true
+
+            # install_name_tool инвалидирует подпись каждого dylib, а на arm64
+            # macOS любой Mach-O без валидной подписи отвергается dyld
+            # ("library load disallowed by system policy"). Подписываем ad-hoc
+            # сами, чтобы не зависеть от того, доходит ли до этого dylibbundler.
+            for f in "${DIR}"/lib/*.dylib; do
+              codesign --force --sign - "$f"
+            done
+            codesign --force --sign - "${DIR}/y2k" "${DIR}/y2k-probe"
+
+            echo "--- otool -L y2k ---"
+            otool -L "${DIR}/y2k"
+            echo "--- codesign verify ---"
+            codesign --verify --verbose=2 "${DIR}/y2k"
+            codesign --verify --verbose=2 "${DIR}/lib/libsasl2.3.dylib" || true
           fi
 
           tar -czvf "${DIR}.tar.gz" "${DIR}"
@@ -105,6 +113,8 @@ jobs:
     needs: build-release
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -114,7 +124,19 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | sort
 
+      - name: Render install notes
+        run: |
+          set -euxo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          sed -e "s/__TAG__/${TAG}/g" -e "s/__VERSION__/${VERSION}/g" \
+            .github/release-notes-template.md > install-notes.md
+          echo "--- install-notes.md ---"
+          cat install-notes.md
+
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          append_body: true
+          body_path: install-notes.md
           files: artifacts/**/*.tar.gz
