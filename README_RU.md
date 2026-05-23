@@ -179,7 +179,8 @@ watermark_parallelism = 16     # дефолт 16
 | `Enter` | открыть выбранное |
 | `Esc` | назад / закрыть модалку |
 | `r` | обновить текущий вид |
-| `:` | команды (`context`, `clusters`, `groups`, `limit`, `poll`, `help`) |
+| `:` | команды (`context`, `clusters`, `groups`, `labels`, `label`, `limit`, `poll`, `help`) |
+| `1` / `2` / `3` | sidebar: Topics / Groups / Labels |
 | `?` | справка |
 | `q` | выход |
 
@@ -187,13 +188,34 @@ watermark_parallelism = 16     # дефолт 16
 
 | Клавиша | Действие |
 |---|---|
-| `/` | фильтр |
+| `Space` | отметить / снять отметку (multi-select, как в k9s) |
+| `L` | добавить лейбл к отмеченным (или текущему) топикам |
+| `U` | удалить лейбл |
+| `D` | сбросить все отметки |
+| `/` | текстовый фильтр |
 | `Enter` | открыть messages для топика |
 | `n` | produce — редактор key + payload |
 | `c` | создать топик (с указанием partitions) |
 | `d` | удалить топик (подтверждение `y`) |
 | `p` | popup с метаданными партиций |
-| `g` | открыть Consumer Groups |
+| `g` | Consumer Groups (sidebar `2`) |
+
+### Labels
+
+Локальные теги топиков (в `config.toml`, не в Kafka) — группировка по микросервисам, окружению и т.д.
+
+| Клавиша | Действие |
+|---|---|
+| `Enter` | Topics с фильтром по лейблу |
+| `/` | фильтр списка лейблов |
+| `1` / `2` / `3` | навигация в sidebar |
+
+```toml
+[topic_labels.lt01]
+"orders" = ["order-service", "prod"]
+```
+
+Команды: `:labels`, `:label billing`.
 
 ### Messages
 

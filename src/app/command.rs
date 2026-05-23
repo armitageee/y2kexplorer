@@ -57,12 +57,36 @@ impl App {
                 }
             }
             "groups" | "g" => self.open_groups(),
+            "labels" => self.switch_nav(crate::views::Screen::Labels),
+            "label" => {
+                if let Some(name) = parts.next() {
+                    let label = name.to_string();
+                    let cluster = self.cluster_name.clone();
+                    let mut tv = crate::views::TopicsView::new();
+                    tv.set_label_filter(Some(label.clone()));
+                    if !self.cached_topics.is_empty() {
+                        tv.load_with_labels(
+                            self.cached_topics.clone(),
+                            &self.config.topic_labels,
+                            &cluster,
+                        );
+                    }
+                    self.stack = vec![crate::views::ViewStack::Topics(tv)];
+                    if self.cached_topics.is_empty() {
+                        self.refresh_topics();
+                    } else {
+                        self.status = format!("filter: label @{label}");
+                    }
+                } else {
+                    self.status = "usage: :label <name>".into();
+                }
+            }
             "help" | "h" | "?" => {
                 let cfg = AppConfig::config_path()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "?".into());
                 self.status = format!(
-                    "config: {cfg}  |  :context <name>  :clusters  :groups  :limit <N>  :poll <sec>  :help"
+                    "config: {cfg}  |  :context  :clusters  :groups  :labels  :label <name>  :limit  :poll  :help"
                 );
             }
             _ => {
@@ -101,6 +125,7 @@ impl App {
         self.cluster_name = name.to_string();
         self.cluster = cluster;
         self.connection = None;
+        self.cached_topics.clear();
         self.stack = vec![crate::views::ViewStack::Topics(
             crate::views::TopicsView::new(),
         )];

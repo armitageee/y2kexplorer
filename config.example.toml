@@ -14,6 +14,11 @@ fetch_watermarks = true
 # Параллелизм опроса watermarks (1..=64). Дефолт 16 даёт ~16× speedup vs sequential.
 watermark_parallelism = 16
 
+# Лейблы топиков (локально, не в Kafka) — для фильтрации и группировки по сервисам.
+# [topic_labels.local]
+# "orders" = ["order-service", "prod"]
+# "payments" = ["billing", "prod"]
+
 [clusters.local]
 brokers = ["localhost:9092"]
 client_id = "y2kexplorer"

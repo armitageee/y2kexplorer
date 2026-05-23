@@ -180,7 +180,8 @@ See [`config.example.toml`](config.example.toml) for full examples.
 | `Enter` | open selection |
 | `Esc` | back / close modal |
 | `r` | refresh current view |
-| `:` | command palette (`context`, `clusters`, `groups`, `limit`, `poll`, `help`) |
+| `:` | command palette (`context`, `clusters`, `groups`, `labels`, `label`, `limit`, `poll`, `help`) |
+| `1` / `2` / `3` | sidebar: Topics / Groups / Labels |
 | `?` | toggle help |
 | `q` | quit |
 
@@ -188,13 +189,36 @@ See [`config.example.toml`](config.example.toml) for full examples.
 
 | Key | Action |
 |---|---|
-| `/` | filter |
+| `Space` | mark / unmark topic (k9s-style multi-select) |
+| `L` | add label to marked (or current) topic(s) |
+| `U` | remove label from marked (or current) topic(s) |
+| `D` | clear all marks |
+| `/` | text filter |
 | `Enter` | open messages for selected topic |
 | `n` | produce — open key + payload editor |
 | `c` | create topic (with partitions) |
 | `d` | delete topic (confirm with `y`) |
 | `p` | partition metadata popup |
-| `g` | open Consumer Groups |
+| `g` | Consumer Groups (sidebar `2`) |
+
+### Labels
+
+Local tags per topic (stored in `config.toml`, not on the broker). Use them to group topics by microservice, env, team, etc.
+
+| Key | Action |
+|---|---|
+| `Enter` | open Topics filtered by this label |
+| `/` | filter label list |
+| `1` / `2` / `3` | sidebar navigation |
+
+Config example:
+
+```toml
+[topic_labels.lt01]
+"orders" = ["order-service", "prod"]
+```
+
+Commands: `:labels` (label browser), `:label billing` (filter topics).
 
 ### Messages
 

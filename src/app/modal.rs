@@ -42,6 +42,12 @@ pub enum Modal {
         group: String,
         spec: String,
     },
+    /// Добавить/удалить лейбл у выбранных топиков.
+    TopicLabel {
+        label: String,
+        add: bool,
+        topic_count: usize,
+    },
 }
 
 impl Modal {
@@ -55,6 +61,13 @@ impl Modal {
             Modal::MessageLimit { .. } => "Message limit",
             Modal::DeleteGroupConfirm { .. } => "Delete consumer group",
             Modal::ResetOffsets { .. } => "Reset offsets",
+            Modal::TopicLabel { add, .. } => {
+                if *add {
+                    "Add label"
+                } else {
+                    "Remove label"
+                }
+            }
         }
     }
 
@@ -100,6 +113,7 @@ impl Modal {
             Modal::MessageLimit { value } => value.push(c),
             Modal::DeleteGroupConfirm { .. } => {}
             Modal::ResetOffsets { spec, .. } => spec.push(c),
+            Modal::TopicLabel { label, .. } => label.push(c),
         }
     }
 
@@ -139,6 +153,9 @@ impl Modal {
             Modal::ResetOffsets { spec, .. } => {
                 spec.pop();
             }
+            Modal::TopicLabel { label, .. } => {
+                label.pop();
+            }
         }
     }
 
@@ -158,6 +175,7 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
         Modal::CreateTopic { .. } => 9,
         Modal::ResetOffsets { .. } => 9,
         Modal::Filter | Modal::Command | Modal::MessageLimit { .. } => 5,
+        Modal::TopicLabel { .. } => 7,
     };
     let popup = centered_rect(popup_w, popup_h, area);
     frame.render_widget(Clear, popup);
@@ -279,6 +297,25 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
                 theme::footer_hint(),
             )),
         ],
+        Modal::TopicLabel {
+            label,
+            add,
+            topic_count,
+        } => {
+            let action = if *add { "add to" } else { "remove from" };
+            vec![
+                Line::from(Span::styled(
+                    format!("{action} {topic_count} topic(s)"),
+                    theme::value(),
+                )),
+                field_line("label", label, true),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "lowercase, no spaces · Enter apply · Esc cancel",
+                    theme::footer_hint(),
+                )),
+            ]
+        }
     };
 
     let widget = Paragraph::new(lines)
@@ -327,4 +364,17 @@ pub fn layout_main(area: Rect, show_full_help: bool) -> [Rect; 3] {
     ])
     .split(area);
     [chunks[0], chunks[1], chunks[2]]
+}
+
+/// Sidebar (14 cols) + main/status/keys, когда на корневом экране навигации.
+pub fn layout_app(
+    area: Rect,
+    show_sidebar: bool,
+    show_full_help: bool,
+) -> (Option<Rect>, [Rect; 3]) {
+    if !show_sidebar {
+        return (None, layout_main(area, show_full_help));
+    }
+    let chunks = Layout::horizontal([Constraint::Length(14), Constraint::Min(10)]).split(area);
+    (Some(chunks[0]), layout_main(chunks[1], show_full_help))
 }

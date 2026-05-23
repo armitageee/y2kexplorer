@@ -6,12 +6,17 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::labels::TopicLabelStore;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub defaults: Defaults,
     #[serde(default)]
     pub clusters: HashMap<String, ClusterConfig>,
+    /// Лейблы топиков по кластерам (локально, не в Kafka).
+    #[serde(default)]
+    pub topic_labels: TopicLabelStore,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -317,6 +322,7 @@ impl AppConfig {
                 watermark_parallelism: default_watermark_parallelism(),
             },
             clusters,
+            topic_labels: TopicLabelStore::default(),
         }
     }
 }

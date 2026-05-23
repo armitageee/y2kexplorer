@@ -53,6 +53,8 @@ pub struct Theme {
     pub title: Style,
     pub header: Style,
     pub selected: Style,
+    /// k9s-style marked row (multi-select).
+    pub marked: Style,
     pub row: Style,
     pub key: Style,
     pub value: Style,
@@ -112,6 +114,10 @@ pub fn header() -> Style {
 #[inline]
 pub fn selected() -> Style {
     current().selected
+}
+#[inline]
+pub fn marked() -> Style {
+    current().marked
 }
 #[inline]
 pub fn row() -> Style {
@@ -224,6 +230,10 @@ fn dark_theme() -> Theme {
             .fg(black)
             .bg(cyan_bright)
             .add_modifier(Modifier::BOLD),
+        marked: Style::new()
+            .fg(white)
+            .bg(Color::Indexed(61))
+            .add_modifier(Modifier::BOLD),
         row: Style::new().fg(white),
         key: Style::new().fg(pink_hot).add_modifier(Modifier::BOLD),
         value: Style::new().fg(white),
@@ -293,6 +303,10 @@ fn light_theme() -> Theme {
         selected: Style::new()
             .fg(white)
             .bg(blue_ps2)
+            .add_modifier(Modifier::BOLD),
+        marked: Style::new()
+            .fg(white)
+            .bg(Color::Indexed(61))
             .add_modifier(Modifier::BOLD),
         row: Style::new().fg(black),
         key: Style::new().fg(pink_dark).add_modifier(Modifier::BOLD),
