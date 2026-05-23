@@ -55,7 +55,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-${{ matrix.target }}
+          # Бампим суффикс при изменении runner-а / системных библиотек,
+          # чтобы инвалидировать stale target/ от предыдущих сборок.
+          shared-key: release-${{ matrix.target }}-u2204
+          cache-on-failure: false
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}

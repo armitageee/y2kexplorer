@@ -43,7 +43,7 @@ jobs:
             libzstd-dev liblz4-dev libcurl4-openssl-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: clippy-linux
+          shared-key: clippy-linux-u2204
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
   test:
@@ -61,7 +61,7 @@ jobs:
             libzstd-dev liblz4-dev libcurl4-openssl-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: test-linux
+          shared-key: test-linux-u2204
       # Интеграционный тест Kafka (#[ignore]) запускать в CI не будем — нужен docker-compose кластер.
       - run: cargo test --workspace --all-features --no-run
       - run: cargo test --workspace --all-features -- --skip fetch_messages_from_local_orders
@@ -115,7 +115,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: build-${{ matrix.target }}
+          shared-key: build-${{ matrix.target }}-u2204
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
