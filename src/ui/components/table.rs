@@ -108,15 +108,15 @@ impl TableView {
                 Row::new(
                     self.headers
                         .iter()
-                        .map(|h| Cell::from(h.as_str()).style(theme::HEADER)),
+                        .map(|h| Cell::from(h.as_str()).style(theme::header())),
                 )
-                .style(theme::HEADER)
+                .style(theme::header())
                 .bottom_margin(1),
             )
             .block(theme::block(title))
             .rows(rows)
             .widths(widths)
-            .row_highlight_style(theme::SELECTED)
+            .row_highlight_style(theme::selected())
             .highlight_symbol("▸ ");
 
         frame.render_stateful_widget(table, area, &mut self.state);

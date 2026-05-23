@@ -289,7 +289,7 @@ impl MessagesView {
 
         let list = List::new(list_items)
             .block(theme::block(self.list_title()))
-            .highlight_style(theme::SELECTED)
+            .highlight_style(theme::selected())
             .highlight_symbol("▸ ");
 
         frame.render_stateful_widget(list, list_area, &mut self.list_state);
@@ -317,37 +317,37 @@ impl MessagesView {
 
 fn format_message_detail(m: &FetchedMessage, pretty_json: bool) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
-        Span::styled("partition ", theme::KEY),
+        Span::styled("partition ", theme::key()),
         Span::raw(m.partition.to_string()),
         Span::raw("  "),
-        Span::styled("offset ", theme::KEY),
+        Span::styled("offset ", theme::key()),
         Span::raw(m.offset.to_string()),
     ])];
     if let Some(ts) = m.timestamp_ms {
         lines.push(Line::from(vec![
-            Span::styled("timestamp ", theme::KEY),
+            Span::styled("timestamp ", theme::key()),
             Span::raw(format_timestamp(ts)),
         ]));
     }
     if let Some(key) = &m.key {
-        lines.push(Line::from(Span::styled("key", theme::KEY)));
+        lines.push(Line::from(Span::styled("key", theme::key())));
         if pretty_json {
             if let Some(pretty) = payload::try_pretty_json(key) {
                 lines.extend(payload::payload_lines(&pretty, false));
             } else {
-                lines.push(Line::from(Span::styled(key.clone(), theme::VALUE)));
+                lines.push(Line::from(Span::styled(key.clone(), theme::value())));
             }
         } else {
-            lines.push(Line::from(Span::styled(key.clone(), theme::VALUE)));
+            lines.push(Line::from(Span::styled(key.clone(), theme::value())));
         }
     }
     if !m.headers.is_empty() {
-        lines.push(Line::from(Span::styled("headers", theme::KEY)));
+        lines.push(Line::from(Span::styled("headers", theme::key())));
         for (k, v) in &m.headers {
             lines.push(Line::from(format!("  {k}: {v}")));
         }
     }
-    lines.push(Line::from(Span::styled("payload", theme::KEY)));
+    lines.push(Line::from(Span::styled("payload", theme::key())));
     match &m.payload {
         Some(p) => lines.extend(payload::payload_lines(p, pretty_json)),
         None => lines.push(Line::from("<null>")),

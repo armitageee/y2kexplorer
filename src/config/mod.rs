@@ -22,6 +22,9 @@ pub struct Defaults {
     /// Интервал live-poll (секунды), 1–30.
     #[serde(default = "default_live_poll_secs")]
     pub live_poll_secs: u64,
+    /// UI-тема: `"dark"` (по умолчанию) или `"light"`. Можно переопределить флагом `--theme`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 fn default_message_limit() -> usize {
@@ -285,6 +288,7 @@ impl AppConfig {
                 cluster: Some("local".into()),
                 message_limit: default_message_limit(),
                 live_poll_secs: default_live_poll_secs(),
+                theme: None,
             },
             clusters,
         }

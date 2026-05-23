@@ -39,6 +39,8 @@ pub struct App {
     worker_tx: Sender<WorkerMsg>,
     last_live_poll: Option<Instant>,
     live_fetch_in_flight: bool,
+    /// Время старта приложения — пока `splash_until` не истёк, показываем splash-screen.
+    splash_until: Option<Instant>,
 }
 
 impl App {
@@ -68,11 +70,27 @@ impl App {
             worker_tx,
             last_live_poll: None,
             live_fetch_in_flight: false,
+            splash_until: Some(Instant::now() + crate::ui::SPLASH_DURATION),
         })
+    }
+
+    /// Активен ли splash-screen прямо сейчас.
+    fn splash_active(&self) -> bool {
+        self.splash_until
+            .map(|deadline| Instant::now() < deadline)
+            .unwrap_or(false)
+    }
+
+    /// Гасит splash немедленно (по клавише или по таймеру в render-tick).
+    fn dismiss_splash(&mut self) {
+        self.splash_until = None;
     }
 
     /// Периодический live-poll (вызывается из главного цикла, не блокирует UI).
     pub fn tick(&mut self) {
+        if self.splash_active() {
+            return;
+        }
         if self.modal.is_some()
             || self.show_partitions_popup
             || self.live_fetch_in_flight
@@ -132,6 +150,17 @@ impl App {
     }
 
     pub fn handle_event(&mut self, ev: Event) -> io::Result<()> {
+        // Любая клавиша во время splash гасит его и НЕ пропускается дальше — иначе
+        // юзер случайно дёрнет, например, `q` и сразу выйдет, не увидев приложение.
+        if self.splash_active() {
+            if let Event::Key(key) = ev {
+                if key.kind == KeyEventKind::Press {
+                    self.dismiss_splash();
+                }
+            }
+            return Ok(());
+        }
+
         if let Some(modal) = self.modal.clone() {
             return self.handle_modal_event(ev, modal);
         }
@@ -898,6 +927,15 @@ impl App {
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
+        if self.splash_active() {
+            crate::ui::draw_splash(frame, area);
+            return;
+        }
+        // splash истёк по таймеру → скидываем флаг, чтобы не звать draw_splash снова.
+        if self.splash_until.is_some() {
+            self.dismiss_splash();
+        }
+
         if self.show_partitions_popup && self.modal.is_none() {
             self.render_partitions_popup(frame, area);
             return;
@@ -952,9 +990,9 @@ impl App {
             Paragraph::new(text).block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(theme::MODAL_BORDER)
+                    .border_style(theme::modal_border())
                     .title(" partitions (Esc) ")
-                    .title_style(theme::BLOCK_TITLE),
+                    .title_style(theme::block_title()),
             ),
             popup[0],
         );

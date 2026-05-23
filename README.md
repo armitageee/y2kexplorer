@@ -1,10 +1,22 @@
-# y2kexplorer
+<p align="center">
+  <img src=".assets/y2kexplorer.png" width="560" alt="y2kexplorer mascot">
+</p>
 
-A terminal UI for Apache Kafka, written in Rust with [ratatui](https://docs.rs/ratatui).
-In spirit similar to [k9s](https://github.com/derailed/k9s) — a fast, keyboard-driven dashboard
-for browsing topics, peeking at messages, and managing consumer groups.
+<h1 align="center">y2kexplorer</h1>
 
-> [Русская версия README](README_RU.md)
+<p align="center">
+  <em>kafka, but make it ps2</em><br>
+  <sub>explore your kafka universe ✦ a retro-flavored Kafka TUI in Rust + ratatui</sub>
+</p>
+
+<p align="center">
+  <a href="README_RU.md">Русская версия</a>
+</p>
+
+A keyboard-driven dashboard for Apache Kafka — in spirit close to
+[k9s](https://github.com/derailed/k9s), but in Rust on
+[ratatui](https://docs.rs/ratatui), with a Y2K/PS2-flavored skin: deep blues,
+chrome cyan, magenta accents, double-line borders.
 
 ## Features
 
@@ -112,8 +124,13 @@ Run with:
 y2k                            # default cluster from defaults.cluster
 y2k --cluster <name>           # pick a cluster from [clusters.<name>]
 y2k --config /path/to.toml     # custom config path
+y2k --theme light              # UI theme: `dark` (default) or `light`
 y2k-probe --cluster <name>     # connection smoke test, no TUI
 ```
+
+The theme can also be persisted in config via `defaults.theme = "light"`.
+Use `light` if your terminal background is bright — colors switch to a darker
+palette while the status bar stays high-contrast.
 
 ### Authentication
 

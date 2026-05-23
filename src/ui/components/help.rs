@@ -11,23 +11,23 @@ pub fn draw_help(frame: &mut Frame, area: Rect, pairs: &[&str]) {
     let iter = pairs.chunks(2);
     for chunk in iter {
         if !spans.is_empty() {
-            spans.push(Span::styled("  │  ", theme::FOOTER_HINT));
+            spans.push(Span::styled("  │  ", theme::footer_hint()));
         }
         if let Some(key) = chunk.first() {
-            spans.push(Span::styled(format!(" {key} "), theme::FOOTER_KEY));
+            spans.push(Span::styled(format!(" {key} "), theme::footer_key()));
         }
         if let Some(desc) = chunk.get(1) {
-            spans.push(Span::styled(*desc, theme::FOOTER_HINT));
+            spans.push(Span::styled(*desc, theme::footer_hint()));
         }
     }
     let widget = Paragraph::new(Line::from(spans))
-        .style(theme::FOOTER)
+        .style(theme::footer())
         .block(
             Block::default()
                 .borders(Borders::TOP)
-                .border_style(theme::FOOTER)
+                .border_style(theme::footer())
                 .title(" keys ")
-                .title_style(theme::FOOTER_TITLE),
+                .title_style(theme::footer_title()),
         );
     frame.render_widget(widget, area);
 }

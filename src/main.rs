@@ -19,6 +19,7 @@ use tracing_subscriber::EnvFilter;
 
 use app::App;
 use config::AppConfig;
+use ui::theme::Palette;
 
 #[derive(Parser, Debug)]
 #[command(name = "y2k", about = "Terminal UI for Apache Kafka")]
@@ -30,6 +31,14 @@ struct Cli {
     /// Cluster name from config (overrides defaults.cluster)
     #[arg(short, long)]
     cluster: Option<String>,
+
+    /// UI theme: `dark` (default) or `light`. Overrides `defaults.theme` from config.
+    #[arg(long, value_parser = parse_palette)]
+    theme: Option<Palette>,
+}
+
+fn parse_palette(s: &str) -> Result<Palette, String> {
+    s.parse()
 }
 
 fn main() -> Result<()> {
@@ -46,6 +55,22 @@ fn main() -> Result<()> {
     if let Some(name) = cli.cluster {
         cfg.defaults.cluster = Some(name);
     }
+
+    // Тема: CLI > config > default(dark). Парсинг из конфига с фолбэком на dark
+    // при невалидном значении (без падения — просто варним и продолжаем).
+    let palette = cli.theme.unwrap_or_else(|| {
+        cfg.defaults
+            .theme
+            .as_deref()
+            .map(|s| s.parse::<Palette>())
+            .transpose()
+            .unwrap_or_else(|err| {
+                eprintln!("y2k: {err}; falling back to dark");
+                None
+            })
+            .unwrap_or_default()
+    });
+    ui::theme::init(palette);
 
     let (tx, rx) = mpsc::channel();
     let mut application = App::new(cfg, tx)?;

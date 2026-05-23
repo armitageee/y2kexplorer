@@ -1,10 +1,21 @@
-# y2kexplorer
+<p align="center">
+  <img src=".assets/y2kexplorer.png" width="560" alt="y2kexplorer mascot">
+</p>
 
-Terminal UI для Apache Kafka на Rust + [ratatui](https://docs.rs/ratatui).
-По духу близко к [k9s](https://github.com/derailed/k9s) — быстрый клавиатурный
-дашборд для топиков, сообщений и consumer-групп.
+<h1 align="center">y2kexplorer</h1>
 
-> [English README](README.md)
+<p align="center">
+  <em>kafka, but make it ps2</em><br>
+  <sub>explore your kafka universe ✦ retro-Kafka TUI на Rust + ratatui</sub>
+</p>
+
+<p align="center">
+  <a href="README.md">English version</a>
+</p>
+
+Клавиатурный дашборд для Apache Kafka — по духу близко к
+[k9s](https://github.com/derailed/k9s), но на Rust + [ratatui](https://docs.rs/ratatui),
+со скином в эстетике Y2K/PS2: тёмно-синий фон, хром-циан, магента-акценты, двойные рамки.
 
 ## Возможности
 
@@ -112,8 +123,13 @@ $EDITOR ~/.config/y2kexplorer/config.toml
 y2k                            # дефолтный кластер из defaults.cluster
 y2k --cluster <name>           # кластер из [clusters.<name>]
 y2k --config /path/to.toml     # кастомный путь к конфигу
+y2k --theme light              # тема UI: `dark` (по умолчанию) или `light`
 y2k-probe --cluster <name>     # smoke-тест подключения без TUI
 ```
+
+Тему можно зафиксировать в конфиге: `defaults.theme = "light"`.
+`light` — для светлого фона терминала; контент-цвета переключаются на тёмные,
+а status-bar остаётся ярко-синим в обеих темах.
 
 ### Аутентификация
 
