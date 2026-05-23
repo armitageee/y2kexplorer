@@ -9,9 +9,11 @@ const HELP: &[&str] = &[
     "nav",
     "Enter",
     "filter topics",
+    "d",
+    "delete label",
     "/",
     "filter",
-    "1/2/3",
+    "1-4",
     "nav pane",
     "?",
     "help",
@@ -19,18 +21,7 @@ const HELP: &[&str] = &[
     "quit",
 ];
 
-const HINT: &[&str] = &[
-    "Enter",
-    "topics with label",
-    "/",
-    "filter",
-    "1",
-    "topics",
-    "2",
-    "groups",
-    "?",
-    "help",
-];
+const HINT: &[&str] = &["Enter", "topics", "d", "delete", "/", "filter", "?", "help"];
 
 pub struct LabelListView {
     pub table: TableView,

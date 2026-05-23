@@ -36,6 +36,11 @@ pub enum Modal {
     DeleteGroupConfirm {
         group: String,
     },
+    /// Удалить лейбл со всех топиков кластера.
+    DeleteLabelConfirm {
+        label: String,
+        topic_count: usize,
+    },
     /// Reset offsets для всех (topic, partition), на которые группа коммитила.
     /// `spec` — одна из строк: `earliest`, `latest`, `offset:N`, `timestamp:UNIX_MS`.
     ResetOffsets {
@@ -60,6 +65,7 @@ impl Modal {
             Modal::DeleteConfirm { .. } => "Delete topic",
             Modal::MessageLimit { .. } => "Message limit",
             Modal::DeleteGroupConfirm { .. } => "Delete consumer group",
+            Modal::DeleteLabelConfirm { .. } => "Delete label",
             Modal::ResetOffsets { .. } => "Reset offsets",
             Modal::TopicLabel { add, .. } => {
                 if *add {
@@ -112,6 +118,7 @@ impl Modal {
             Modal::DeleteConfirm { .. } => {}
             Modal::MessageLimit { value } => value.push(c),
             Modal::DeleteGroupConfirm { .. } => {}
+            Modal::DeleteLabelConfirm { .. } => {}
             Modal::ResetOffsets { spec, .. } => spec.push(c),
             Modal::TopicLabel { label, .. } => label.push(c),
         }
@@ -150,6 +157,7 @@ impl Modal {
                 value.pop();
             }
             Modal::DeleteGroupConfirm { .. } => {}
+            Modal::DeleteLabelConfirm { .. } => {}
             Modal::ResetOffsets { spec, .. } => {
                 spec.pop();
             }
@@ -162,7 +170,9 @@ impl Modal {
     pub fn is_yes(&self, c: char) -> bool {
         matches!(
             self,
-            Modal::DeleteConfirm { .. } | Modal::DeleteGroupConfirm { .. }
+            Modal::DeleteConfirm { .. }
+                | Modal::DeleteGroupConfirm { .. }
+                | Modal::DeleteLabelConfirm { .. }
         ) && matches!(c, 'y' | 'Y')
     }
 }
@@ -170,7 +180,9 @@ impl Modal {
 pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Option<&str>) {
     let popup_w = area.width.clamp(40, 72);
     let popup_h = match modal {
-        Modal::DeleteConfirm { .. } | Modal::DeleteGroupConfirm { .. } => 7,
+        Modal::DeleteConfirm { .. }
+        | Modal::DeleteGroupConfirm { .. }
+        | Modal::DeleteLabelConfirm { .. } => 7,
         Modal::Produce { .. } => 11,
         Modal::CreateTopic { .. } => 9,
         Modal::ResetOffsets { .. } => 9,
@@ -274,6 +286,21 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
             Line::from(Span::styled(
                 format!("Delete consumer group \"{group}\"?"),
                 theme::error(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "y confirm · n/Esc cancel",
+                theme::footer_hint(),
+            )),
+        ],
+        Modal::DeleteLabelConfirm { label, topic_count } => vec![
+            Line::from(Span::styled(
+                format!("Remove label \"{label}\" from all topics?"),
+                theme::error(),
+            )),
+            Line::from(Span::styled(
+                format!("({topic_count} topic(s) in this cluster)"),
+                theme::value(),
             )),
             Line::from(""),
             Line::from(Span::styled(

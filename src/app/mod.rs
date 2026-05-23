@@ -14,7 +14,8 @@ use ratatui::Frame;
 use crate::config::{clamp_live_poll_secs, clamp_watermark_parallelism, AppConfig, ClusterConfig};
 use crate::kafka::{ClusterConnection, ListTopicsOptions, PartitionInfo, ResetStrategy, TopicInfo};
 use crate::views::{
-    GroupDetailsView, GroupsView, LabelListView, MessagesView, Screen, TopicsView, ViewStack,
+    ContextListView, GroupDetailsView, GroupsView, LabelListView, MessagesView, Screen, TopicsView,
+    ViewStack,
 };
 
 use crate::ui::draw_sidebar;
@@ -228,6 +229,15 @@ impl App {
                             self.close_modal();
                         }
                     }
+                    Modal::DeleteLabelConfirm { label, .. } => {
+                        if modal.is_yes(c) {
+                            let label = label.clone();
+                            self.close_modal();
+                            self.run_delete_label(label);
+                        } else if c == 'n' || c == 'N' {
+                            self.close_modal();
+                        }
+                    }
                     _ => {
                         if let Some(m) = self.modal.as_mut() {
                             m.push_char(c);
@@ -255,6 +265,7 @@ impl App {
                     ViewStack::Topics(v) => v.table.filter = filter,
                     ViewStack::Groups(v) => v.table.filter = filter,
                     ViewStack::Labels(v) => v.table.filter = filter,
+                    ViewStack::Contexts(v) => v.table.filter = filter,
                     _ => {}
                 }
                 self.close_modal();
@@ -315,6 +326,10 @@ impl App {
                 self.run_delete_group(group);
                 self.close_modal();
             }
+            Modal::DeleteLabelConfirm { label, .. } => {
+                self.run_delete_label(label);
+                self.close_modal();
+            }
             Modal::ResetOffsets { group, spec } => {
                 let strategy = match parse_reset_spec(spec.trim()) {
                     Ok(s) => s,
@@ -362,11 +377,16 @@ impl App {
                     self.filter_buf = v.table.filter.clone();
                     self.modal = Some(Modal::Filter);
                 }
+                ViewStack::Contexts(v) => {
+                    self.filter_buf = v.table.filter.clone();
+                    self.modal = Some(Modal::Filter);
+                }
                 _ => {}
             },
             KeyCode::Char('1') => self.switch_nav(Screen::Topics),
             KeyCode::Char('2') => self.switch_nav(Screen::Groups),
             KeyCode::Char('3') => self.switch_nav(Screen::Labels),
+            KeyCode::Char('4') => self.switch_nav(Screen::Contexts),
             KeyCode::Char(' ') => {
                 if let ViewStack::Topics(v) = self.current_mut() {
                     v.toggle_mark();
@@ -428,6 +448,18 @@ impl App {
             KeyCode::Char('d') => {
                 if let ViewStack::Messages(v) = self.current_mut() {
                     v.scroll_detail_down(3);
+                } else if let ViewStack::Labels(v) = self.current() {
+                    if let Some(label) = v.selected_label() {
+                        let label = label.to_string();
+                        let count = self
+                            .config
+                            .topic_labels
+                            .label_topic_count(&self.cluster_name, &label);
+                        self.modal = Some(Modal::DeleteLabelConfirm {
+                            label,
+                            topic_count: count,
+                        });
+                    }
                 } else if let ViewStack::Groups(v) = self.current() {
                     if let Some(group) = v.selected_group().cloned() {
                         if !group.is_empty_or_dead() {
@@ -567,7 +599,10 @@ impl App {
         match self.current() {
             ViewStack::Topics(v) => v.selected_topic().map(str::to_string),
             ViewStack::Messages(v) => Some(v.topic.clone()),
-            ViewStack::Groups(_) | ViewStack::GroupDetails(_) | ViewStack::Labels(_) => None,
+            ViewStack::Groups(_)
+            | ViewStack::GroupDetails(_)
+            | ViewStack::Labels(_)
+            | ViewStack::Contexts(_) => None,
         }
     }
 
@@ -634,6 +669,7 @@ impl App {
             ViewStack::Groups(v) => v.show_help = !v.show_help,
             ViewStack::GroupDetails(v) => v.show_help = !v.show_help,
             ViewStack::Labels(v) => v.show_help = !v.show_help,
+            ViewStack::Contexts(v) => v.show_help = !v.show_help,
         }
     }
 
@@ -644,6 +680,7 @@ impl App {
             ViewStack::Groups(v) => v.table.next(),
             ViewStack::GroupDetails(v) => v.table.next(),
             ViewStack::Labels(v) => v.table.next(),
+            ViewStack::Contexts(v) => v.table.next(),
         }
     }
 
@@ -654,6 +691,7 @@ impl App {
             ViewStack::Groups(v) => v.table.prev(),
             ViewStack::GroupDetails(v) => v.table.prev(),
             ViewStack::Labels(v) => v.table.prev(),
+            ViewStack::Contexts(v) => v.table.prev(),
         }
     }
 
@@ -707,6 +745,16 @@ impl App {
                         self.refresh_topics();
                     } else {
                         self.status = format!("filter: label @{label}");
+                    }
+                }
+            }
+            ViewStack::Contexts(v) => {
+                if let Some(name) = v.selected_context() {
+                    if name == self.cluster_name {
+                        self.switch_nav(Screen::Topics);
+                        self.status = format!("context: {name}");
+                    } else {
+                        self.switch_cluster(&name);
                     }
                 }
             }
@@ -786,6 +834,14 @@ impl App {
                 }
                 self.status = "labels refreshed".into();
             }
+            ViewStack::Contexts(_) => {
+                let active = self.cluster_name.clone();
+                let config = self.config.clone();
+                if let ViewStack::Contexts(v) = self.current_mut() {
+                    v.load(&config, &active);
+                }
+                self.status = "contexts refreshed".into();
+            }
         }
     }
 
@@ -845,9 +901,17 @@ impl App {
             }
             Screen::Labels => {
                 let mut v = LabelListView::new();
-                v.load(&self.config.topic_labels, &cluster);
+                let store = self.config.topic_labels.clone();
+                v.load(&store, &cluster);
                 self.stack = vec![ViewStack::Labels(v)];
                 self.status = "labels".into();
+            }
+            Screen::Contexts => {
+                let mut v = ContextListView::new();
+                let config = self.config.clone();
+                v.load(&config, &cluster);
+                self.stack = vec![ViewStack::Contexts(v)];
+                self.status = "contexts".into();
             }
             _ => {}
         }
@@ -889,6 +953,27 @@ impl App {
             }
         }
         let store = self.config.topic_labels.clone();
+        if let ViewStack::Topics(v) = self.current_mut() {
+            v.refresh_labels(&store, &cluster);
+        }
+    }
+
+    fn run_delete_label(&mut self, label: String) {
+        let cluster = self.cluster_name.clone();
+        let affected = self.config.topic_labels.delete_label(&cluster, &label);
+        match self.config.save() {
+            Ok(()) => {
+                self.status = format!("deleted label '{label}' from {affected} topic(s) (saved)");
+            }
+            Err(e) => {
+                self.status =
+                    format!("deleted label '{label}' from {affected} topic(s) (not saved: {e:#})");
+            }
+        }
+        let store = self.config.topic_labels.clone();
+        if let ViewStack::Labels(v) = self.current_mut() {
+            v.load(&store, &cluster);
+        }
         if let ViewStack::Topics(v) = self.current_mut() {
             v.refresh_labels(&store, &cluster);
         }
@@ -1131,6 +1216,7 @@ impl App {
             ViewStack::Groups(v) => v.show_help,
             ViewStack::GroupDetails(v) => v.show_help,
             ViewStack::Labels(v) => v.show_help,
+            ViewStack::Contexts(v) => v.show_help,
         };
         let show_sidebar = self.stack.len() == 1 && self.current().is_root_nav();
         let root_screen = self.current().root_screen();
@@ -1154,6 +1240,9 @@ impl App {
                 frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
             ),
             ViewStack::Labels(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::Contexts(v) => v.render(
                 frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
             ),
         }

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".assets/y2kexplorer.png" width="560" alt="y2kexplorer mascot">
+  <img src=".assets/y2kagent.png" width="560" alt="y2kexplorer mascot">
 </p>
 
 <h1 align="center">y2kexplorer</h1>
@@ -181,7 +181,7 @@ See [`config.example.toml`](config.example.toml) for full examples.
 | `Esc` | back / close modal |
 | `r` | refresh current view |
 | `:` | command palette (`context`, `clusters`, `groups`, `labels`, `label`, `limit`, `poll`, `help`) |
-| `1` / `2` / `3` | sidebar: Topics / Groups / Labels |
+| `1` / `2` / `3` / `4` | sidebar: Topics / Groups / Labels / Contexts |
 | `?` | toggle help |
 | `q` | quit |
 
@@ -208,8 +208,9 @@ Local tags per topic (stored in `config.toml`, not on the broker). Use them to g
 | Key | Action |
 |---|---|
 | `Enter` | open Topics filtered by this label |
+| `d` | delete label from all topics in cluster (confirm `y`) |
 | `/` | filter label list |
-| `1` / `2` / `3` | sidebar navigation |
+| `1` / `2` / `3` / `4` | sidebar navigation |
 
 Config example:
 
@@ -218,7 +219,19 @@ Config example:
 "orders" = ["order-service", "prod"]
 ```
 
-Commands: `:labels` (label browser), `:label billing` (filter topics).
+Commands: `:labels`, `:label billing` (filter topics), `:label-delete billing` (remove everywhere).
+
+### Contexts
+
+Browse and switch Kafka clusters defined in `config.toml`.
+
+| Key | Action |
+|---|---|
+| `Enter` | switch to selected cluster (reconnect + Topics) |
+| `/` | filter context list |
+| `4` | open Contexts from anywhere (sidebar) |
+
+Commands: `:contexts`, `:context <name>` (quick switch without the menu).
 
 ### Messages
 

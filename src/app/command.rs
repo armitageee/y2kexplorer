@@ -58,6 +58,14 @@ impl App {
             }
             "groups" | "g" => self.open_groups(),
             "labels" => self.switch_nav(crate::views::Screen::Labels),
+            "contexts" => self.switch_nav(crate::views::Screen::Contexts),
+            "label-delete" | "label-rm" => {
+                if let Some(name) = parts.next() {
+                    self.run_delete_label(name.to_string());
+                } else {
+                    self.status = "usage: :label-delete <name>".into();
+                }
+            }
             "label" => {
                 if let Some(name) = parts.next() {
                     let label = name.to_string();
@@ -86,7 +94,7 @@ impl App {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "?".into());
                 self.status = format!(
-                    "config: {cfg}  |  :context  :clusters  :groups  :labels  :label <name>  :limit  :poll  :help"
+                    "config: {cfg}  |  :context  :contexts  :groups  :labels  :label  :label-delete  :limit  :poll  :help"
                 );
             }
             _ => {

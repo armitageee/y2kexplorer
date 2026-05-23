@@ -95,6 +95,44 @@ impl TopicLabelStore {
             self.add_label(cluster, t, label);
         }
     }
+
+    /// Удалить лейбл со всех топиков кластера. Возвращает число топиков, где лейбл был снят.
+    pub fn delete_label(&mut self, cluster: &str, label: &str) -> usize {
+        let needle = label.trim().to_lowercase();
+        if needle.is_empty() {
+            return 0;
+        }
+        let Some(topics) = self.clusters.get_mut(cluster) else {
+            return 0;
+        };
+        let mut affected = 0usize;
+        let empty_topics: Vec<String> = topics
+            .iter_mut()
+            .filter_map(|(topic, labels)| {
+                let before = labels.len();
+                labels.retain(|l| l.to_lowercase() != needle);
+                if before != labels.len() {
+                    affected += 1;
+                }
+                if labels.is_empty() {
+                    Some(topic.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for t in empty_topics {
+            topics.remove(&t);
+        }
+        if topics.is_empty() {
+            self.clusters.remove(cluster);
+        }
+        affected
+    }
+
+    pub fn label_topic_count(&self, cluster: &str, label: &str) -> usize {
+        self.topics_with_label(cluster, label).len()
+    }
 }
 
 fn normalize_label(s: &str) -> String {
@@ -121,5 +159,10 @@ mod tests {
         store.add_label("c1", "payments", "billing");
         let all = store.all_labels("c1");
         assert_eq!(all, vec![("billing".into(), 2)]);
+
+        let n = store.delete_label("c1", "billing");
+        assert_eq!(n, 2);
+        assert!(store.all_labels("c1").is_empty());
+        assert!(store.labels_for("c1", "orders").is_empty());
     }
 }

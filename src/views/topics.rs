@@ -32,7 +32,7 @@ const HELP: &[&str] = &[
     "partitions",
     "g",
     "groups",
-    "1/2/3",
+    "1-4",
     "nav",
     "r",
     "refresh",

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".assets/y2kexplorer.png" width="560" alt="y2kexplorer mascot">
+  <img src=".assets/y2kagent.png" width="560" alt="y2kexplorer mascot">
 </p>
 
 <h1 align="center">y2kexplorer</h1>
@@ -180,7 +180,7 @@ watermark_parallelism = 16     # дефолт 16
 | `Esc` | назад / закрыть модалку |
 | `r` | обновить текущий вид |
 | `:` | команды (`context`, `clusters`, `groups`, `labels`, `label`, `limit`, `poll`, `help`) |
-| `1` / `2` / `3` | sidebar: Topics / Groups / Labels |
+| `1` / `2` / `3` / `4` | sidebar: Topics / Groups / Labels / Contexts |
 | `?` | справка |
 | `q` | выход |
 
@@ -207,15 +207,28 @@ watermark_parallelism = 16     # дефолт 16
 | Клавиша | Действие |
 |---|---|
 | `Enter` | Topics с фильтром по лейблу |
+| `d` | удалить лейбл со всех топиков кластера (подтверждение `y`) |
 | `/` | фильтр списка лейблов |
-| `1` / `2` / `3` | навигация в sidebar |
+| `1` / `2` / `3` / `4` | навигация в sidebar |
 
 ```toml
 [topic_labels.lt01]
 "orders" = ["order-service", "prod"]
 ```
 
-Команды: `:labels`, `:label billing`.
+Команды: `:labels`, `:label billing`, `:label-delete billing` (удалить везде).
+
+### Contexts
+
+Список кластеров из `config.toml` и переключение между ними.
+
+| Клавиша | Действие |
+|---|---|
+| `Enter` | переключиться на кластер (переподключение + Topics) |
+| `/` | фильтр списка |
+| `4` | экран Contexts (sidebar) |
+
+Команды: `:contexts`, `:context <имя>`.
 
 ### Messages
 
