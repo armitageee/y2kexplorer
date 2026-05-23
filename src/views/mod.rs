@@ -1,6 +1,6 @@
+mod context_list;
 mod group_details;
 mod groups;
-mod context_list;
 mod label_list;
 mod messages;
 mod stack;

@@ -208,8 +208,9 @@ Local tags per topic (stored in `config.toml`, not on the broker). Use them to g
 | Key | Action |
 |---|---|
 | `Enter` | open Topics filtered by this label |
+| `d` | delete label from all topics in cluster (confirm `y`) |
 | `/` | filter label list |
-| `1` / `2` / `3` | sidebar navigation |
+| `1` / `2` / `3` / `4` | sidebar navigation |
 
 Config example:
 
@@ -218,7 +219,7 @@ Config example:
 "orders" = ["order-service", "prod"]
 ```
 
-Commands: `:labels` (label browser), `:label billing` (filter topics).
+Commands: `:labels`, `:label billing` (filter topics), `:label-delete billing` (remove everywhere).
 
 ### Contexts
 

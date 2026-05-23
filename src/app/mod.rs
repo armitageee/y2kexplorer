@@ -14,8 +14,8 @@ use ratatui::Frame;
 use crate::config::{clamp_live_poll_secs, clamp_watermark_parallelism, AppConfig, ClusterConfig};
 use crate::kafka::{ClusterConnection, ListTopicsOptions, PartitionInfo, ResetStrategy, TopicInfo};
 use crate::views::{
-    ContextListView, GroupDetailsView, GroupsView, LabelListView, MessagesView, Screen,
-    TopicsView, ViewStack,
+    ContextListView, GroupDetailsView, GroupsView, LabelListView, MessagesView, Screen, TopicsView,
+    ViewStack,
 };
 
 use crate::ui::draw_sidebar;
@@ -229,6 +229,15 @@ impl App {
                             self.close_modal();
                         }
                     }
+                    Modal::DeleteLabelConfirm { label, .. } => {
+                        if modal.is_yes(c) {
+                            let label = label.clone();
+                            self.close_modal();
+                            self.run_delete_label(label);
+                        } else if c == 'n' || c == 'N' {
+                            self.close_modal();
+                        }
+                    }
                     _ => {
                         if let Some(m) = self.modal.as_mut() {
                             m.push_char(c);
@@ -315,6 +324,10 @@ impl App {
             }
             Modal::DeleteGroupConfirm { group } => {
                 self.run_delete_group(group);
+                self.close_modal();
+            }
+            Modal::DeleteLabelConfirm { label, .. } => {
+                self.run_delete_label(label);
                 self.close_modal();
             }
             Modal::ResetOffsets { group, spec } => {
@@ -435,6 +448,18 @@ impl App {
             KeyCode::Char('d') => {
                 if let ViewStack::Messages(v) = self.current_mut() {
                     v.scroll_detail_down(3);
+                } else if let ViewStack::Labels(v) = self.current() {
+                    if let Some(label) = v.selected_label() {
+                        let label = label.to_string();
+                        let count = self
+                            .config
+                            .topic_labels
+                            .label_topic_count(&self.cluster_name, &label);
+                        self.modal = Some(Modal::DeleteLabelConfirm {
+                            label,
+                            topic_count: count,
+                        });
+                    }
                 } else if let ViewStack::Groups(v) = self.current() {
                     if let Some(group) = v.selected_group().cloned() {
                         if !group.is_empty_or_dead() {
@@ -574,7 +599,9 @@ impl App {
         match self.current() {
             ViewStack::Topics(v) => v.selected_topic().map(str::to_string),
             ViewStack::Messages(v) => Some(v.topic.clone()),
-            ViewStack::Groups(_) | ViewStack::GroupDetails(_) | ViewStack::Labels(_)
+            ViewStack::Groups(_)
+            | ViewStack::GroupDetails(_)
+            | ViewStack::Labels(_)
             | ViewStack::Contexts(_) => None,
         }
     }
@@ -926,6 +953,27 @@ impl App {
             }
         }
         let store = self.config.topic_labels.clone();
+        if let ViewStack::Topics(v) = self.current_mut() {
+            v.refresh_labels(&store, &cluster);
+        }
+    }
+
+    fn run_delete_label(&mut self, label: String) {
+        let cluster = self.cluster_name.clone();
+        let affected = self.config.topic_labels.delete_label(&cluster, &label);
+        match self.config.save() {
+            Ok(()) => {
+                self.status = format!("deleted label '{label}' from {affected} topic(s) (saved)");
+            }
+            Err(e) => {
+                self.status =
+                    format!("deleted label '{label}' from {affected} topic(s) (not saved: {e:#})");
+            }
+        }
+        let store = self.config.topic_labels.clone();
+        if let ViewStack::Labels(v) = self.current_mut() {
+            v.load(&store, &cluster);
+        }
         if let ViewStack::Topics(v) = self.current_mut() {
             v.refresh_labels(&store, &cluster);
         }

@@ -207,15 +207,16 @@ watermark_parallelism = 16     # дефолт 16
 | Клавиша | Действие |
 |---|---|
 | `Enter` | Topics с фильтром по лейблу |
+| `d` | удалить лейбл со всех топиков кластера (подтверждение `y`) |
 | `/` | фильтр списка лейблов |
-| `1` / `2` / `3` | навигация в sidebar |
+| `1` / `2` / `3` / `4` | навигация в sidebar |
 
 ```toml
 [topic_labels.lt01]
 "orders" = ["order-service", "prod"]
 ```
 
-Команды: `:labels`, `:label billing`.
+Команды: `:labels`, `:label billing`, `:label-delete billing` (удалить везде).
 
 ### Contexts
 

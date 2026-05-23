@@ -19,16 +19,7 @@ const HELP: &[&str] = &[
     "quit",
 ];
 
-const HINT: &[&str] = &[
-    "Enter",
-    "switch",
-    "/",
-    "filter",
-    "1",
-    "topics",
-    "?",
-    "help",
-];
+const HINT: &[&str] = &["Enter", "switch", "/", "filter", "1", "topics", "?", "help"];
 
 pub struct ContextListView {
     pub table: TableView,
@@ -40,12 +31,7 @@ impl ContextListView {
         Self {
             table: TableView::new(
                 "Contexts",
-                vec![
-                    "CONTEXT".into(),
-                    "".into(),
-                    "BROKERS".into(),
-                    "AUTH".into(),
-                ],
+                vec!["CONTEXT".into(), "".into(), "BROKERS".into(), "AUTH".into()],
             ),
             show_help: false,
         }
