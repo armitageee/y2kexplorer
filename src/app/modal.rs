@@ -33,6 +33,15 @@ pub enum Modal {
     MessageLimit {
         value: String,
     },
+    DeleteGroupConfirm {
+        group: String,
+    },
+    /// Reset offsets для всех (topic, partition), на которые группа коммитила.
+    /// `spec` — одна из строк: `earliest`, `latest`, `offset:N`, `timestamp:UNIX_MS`.
+    ResetOffsets {
+        group: String,
+        spec: String,
+    },
 }
 
 impl Modal {
@@ -44,6 +53,8 @@ impl Modal {
             Modal::CreateTopic { .. } => "Create topic",
             Modal::DeleteConfirm { .. } => "Delete topic",
             Modal::MessageLimit { .. } => "Message limit",
+            Modal::DeleteGroupConfirm { .. } => "Delete consumer group",
+            Modal::ResetOffsets { .. } => "Reset offsets",
         }
     }
 
@@ -87,6 +98,8 @@ impl Modal {
             },
             Modal::DeleteConfirm { .. } => {}
             Modal::MessageLimit { value } => value.push(c),
+            Modal::DeleteGroupConfirm { .. } => {}
+            Modal::ResetOffsets { spec, .. } => spec.push(c),
         }
     }
 
@@ -122,20 +135,28 @@ impl Modal {
             Modal::MessageLimit { value } => {
                 value.pop();
             }
+            Modal::DeleteGroupConfirm { .. } => {}
+            Modal::ResetOffsets { spec, .. } => {
+                spec.pop();
+            }
         }
     }
 
     pub fn is_yes(&self, c: char) -> bool {
-        matches!(self, Modal::DeleteConfirm { .. }) && matches!(c, 'y' | 'Y')
+        matches!(
+            self,
+            Modal::DeleteConfirm { .. } | Modal::DeleteGroupConfirm { .. }
+        ) && matches!(c, 'y' | 'Y')
     }
 }
 
 pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Option<&str>) {
     let popup_w = area.width.clamp(40, 72);
     let popup_h = match modal {
-        Modal::DeleteConfirm { .. } => 7,
+        Modal::DeleteConfirm { .. } | Modal::DeleteGroupConfirm { .. } => 7,
         Modal::Produce { .. } => 11,
         Modal::CreateTopic { .. } => 9,
+        Modal::ResetOffsets { .. } => 9,
         Modal::Filter | Modal::Command | Modal::MessageLimit { .. } => 5,
     };
     let popup = centered_rect(popup_w, popup_h, area);
@@ -222,6 +243,30 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
             Line::from(""),
             Line::from(Span::styled(
                 "10–10000 · Enter apply · Esc cancel",
+                theme::FOOTER_HINT,
+            )),
+        ],
+        Modal::DeleteGroupConfirm { group } => vec![
+            Line::from(Span::styled(
+                format!("Delete consumer group \"{group}\"?"),
+                theme::ERROR,
+            )),
+            Line::from(""),
+            Line::from(Span::styled("y confirm · n/Esc cancel", theme::FOOTER_HINT)),
+        ],
+        Modal::ResetOffsets { group, spec } => vec![
+            Line::from(vec![
+                Span::styled("group: ", theme::MODAL_LABEL),
+                Span::styled(group.as_str(), theme::VALUE),
+            ]),
+            field_line("spec", spec, true),
+            Line::from(""),
+            Line::from(Span::styled(
+                "earliest · latest · offset:N · timestamp:UNIX_MS",
+                theme::FOOTER_HINT,
+            )),
+            Line::from(Span::styled(
+                "Enter apply · Esc cancel  (group must be Empty/Dead)",
                 theme::FOOTER_HINT,
             )),
         ],

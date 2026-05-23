@@ -56,12 +56,13 @@ impl App {
                     self.status = format!("live poll interval: {secs}s  (:poll <1-30>)");
                 }
             }
+            "groups" | "g" => self.open_groups(),
             "help" | "h" | "?" => {
                 let cfg = AppConfig::config_path()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "?".into());
                 self.status = format!(
-                    "config: {cfg}  |  :context <name>  :clusters  :limit <N>  :poll <sec>  :help"
+                    "config: {cfg}  |  :context <name>  :clusters  :groups  :limit <N>  :poll <sec>  :help"
                 );
             }
             _ => {

@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::client::DefaultClientContext;
 use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer};
 use rdkafka::error::RDKafkaErrorCode;
 use rdkafka::message::{Headers, Message};
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
@@ -34,11 +34,44 @@ pub struct PartitionInfo {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // зарезервировано под future view со списком consumer groups
 pub struct ConsumerGroupInfo {
     pub id: String,
     pub state: String,
     pub members: usize,
+    pub protocol: String,
+    pub protocol_type: String,
+}
+
+impl ConsumerGroupInfo {
+    /// Reset/delete операции допустимы только когда у группы нет активных членов:
+    /// иначе брокер вернёт REBALANCE_IN_PROGRESS / UNKNOWN_MEMBER_ID.
+    pub fn is_empty_or_dead(&self) -> bool {
+        let s = self.state.as_str();
+        s == "Empty" || s == "Dead"
+    }
+}
+
+/// Один (topic, partition) commit-оффсет для consumer-group + LEO/lag.
+#[derive(Debug, Clone)]
+pub struct GroupOffset {
+    pub topic: String,
+    pub partition: i32,
+    /// `None` — у группы нет коммита для этой партиции.
+    pub current_offset: Option<i64>,
+    pub log_end_offset: i64,
+    pub lag: i64,
+}
+
+/// Куда сдвинуть оффсеты при reset.
+#[derive(Debug, Clone)]
+pub enum ResetStrategy {
+    Earliest,
+    Latest,
+    /// Абсолютный оффсет (применяется ко всем партициям всех топиков, на которые
+    /// есть коммит у группы). Если значение вне `[low, high]` — клампится.
+    ToOffset(i64),
+    /// Unix-миллисекунды. Преобразуется в оффсеты через `offsets_for_times`.
+    ToTimestamp(i64),
 }
 
 #[derive(Debug, Clone)]
@@ -367,6 +400,223 @@ impl ClusterConnection {
         producer
             .flush(Timeout::After(Duration::from_secs(10)))
             .context("flush producer")?;
+        Ok(())
+    }
+
+    /// Список всех consumer-групп кластера.
+    pub fn list_consumer_groups(&self) -> Result<Vec<ConsumerGroupInfo>> {
+        let consumer: BaseConsumer = base_config(&self.cluster)
+            .set(
+                "group.id",
+                format!("y2kexplorer-grouplist-{}", std::process::id()),
+            )
+            .set("enable.auto.commit", "false")
+            .set("enable.partition.eof", "false")
+            .set("log_level", "0")
+            .create()
+            .context("create groups-meta consumer")?;
+        let gl = consumer
+            .fetch_group_list(None, Timeout::After(Duration::from_secs(15)))
+            .context("fetch group list")?;
+        let mut out: Vec<ConsumerGroupInfo> = gl
+            .groups()
+            .iter()
+            .map(|g| ConsumerGroupInfo {
+                id: g.name().to_string(),
+                state: g.state().to_string(),
+                members: g.members().len(),
+                protocol: g.protocol().to_string(),
+                protocol_type: g.protocol_type().to_string(),
+            })
+            .collect();
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(out)
+    }
+
+    /// Метаданные одной группы (state, members, protocol).
+    pub fn describe_group(&self, group: &str) -> Result<ConsumerGroupInfo> {
+        let consumer: BaseConsumer = base_config(&self.cluster)
+            .set(
+                "group.id",
+                format!("y2kexplorer-describe-{}", std::process::id()),
+            )
+            .set("enable.auto.commit", "false")
+            .set("enable.partition.eof", "false")
+            .set("log_level", "0")
+            .create()
+            .context("create describe consumer")?;
+        let gl = consumer
+            .fetch_group_list(Some(group), Timeout::After(Duration::from_secs(10)))
+            .context("describe group")?;
+        let g = gl
+            .groups()
+            .iter()
+            .find(|g| g.name() == group)
+            .with_context(|| format!("group '{group}' not found"))?;
+        Ok(ConsumerGroupInfo {
+            id: g.name().to_string(),
+            state: g.state().to_string(),
+            members: g.members().len(),
+            protocol: g.protocol().to_string(),
+            protocol_type: g.protocol_type().to_string(),
+        })
+    }
+
+    /// Коммит-оффсеты группы по всем (topic, partition) с lag = LEO − committed.
+    /// Партиции без коммита у этой группы (`Offset::Invalid`) отбрасываются.
+    pub fn group_offsets(&self, group: &str) -> Result<Vec<GroupOffset>> {
+        let metadata = self
+            .admin
+            .inner()
+            .fetch_metadata(None, Timeout::After(Duration::from_secs(10)))
+            .context("fetch cluster metadata")?;
+
+        let mut tpl = TopicPartitionList::new();
+        for t in metadata.topics() {
+            let name = t.name();
+            if name.is_empty() {
+                continue;
+            }
+            for p in t.partitions() {
+                tpl.add_partition_offset(name, p.id(), Offset::Invalid)?;
+            }
+        }
+        if tpl.count() == 0 {
+            return Ok(Vec::new());
+        }
+
+        let consumer: BaseConsumer = base_config(&self.cluster)
+            .set("group.id", group)
+            .set("enable.auto.commit", "false")
+            .set("enable.partition.eof", "false")
+            .set("log_level", "0")
+            .create()
+            .context("create offsets consumer")?;
+        let committed = consumer
+            .committed_offsets(tpl, Timeout::After(Duration::from_secs(15)))
+            .context("fetch committed offsets")?;
+
+        let timeout = Timeout::After(Duration::from_secs(5));
+        let mut out: Vec<GroupOffset> = Vec::new();
+        for elem in committed.elements() {
+            let off = match elem.offset() {
+                Offset::Offset(n) => Some(n),
+                _ => None,
+            };
+            if off.is_none() {
+                continue;
+            }
+            let topic = elem.topic().to_string();
+            let part = elem.partition();
+            let (_low, high) = consumer
+                .fetch_watermarks(&topic, part, timeout)
+                .with_context(|| format!("watermarks {topic}-{part}"))?;
+            let current = off.unwrap_or(0);
+            let lag = (high - current).max(0);
+            out.push(GroupOffset {
+                topic,
+                partition: part,
+                current_offset: off,
+                log_end_offset: high,
+                lag,
+            });
+        }
+        out.sort_by(|a, b| a.topic.cmp(&b.topic).then(a.partition.cmp(&b.partition)));
+        Ok(out)
+    }
+
+    /// Сброс / сдвиг оффсетов всех (topic, partition), на которые группа коммитила.
+    /// Группа должна быть в состоянии Empty/Dead — иначе брокер откажет.
+    pub fn reset_group_offsets(&self, group: &str, strategy: &ResetStrategy) -> Result<usize> {
+        // Pre-flight: лучше дать понятное сообщение, чем брокерскую ошибку
+        // вида "REBALANCE_IN_PROGRESS".
+        let info = self.describe_group(group)?;
+        if !info.is_empty_or_dead() {
+            anyhow::bail!(
+                "group '{group}' is in state '{state}'; stop all consumers (group must be Empty or Dead)",
+                state = info.state
+            );
+        }
+
+        let current = self.group_offsets(group)?;
+        if current.is_empty() {
+            anyhow::bail!("group '{group}' has no committed offsets to reset");
+        }
+
+        let consumer: BaseConsumer = base_config(&self.cluster)
+            .set("group.id", group)
+            .set("enable.auto.commit", "false")
+            .set("enable.partition.eof", "false")
+            .set("log_level", "0")
+            .create()
+            .context("create reset consumer")?;
+
+        let wm_timeout = Timeout::After(Duration::from_secs(5));
+        let mut tpl = TopicPartitionList::new();
+        let count = current.len();
+
+        match strategy {
+            ResetStrategy::Earliest => {
+                for o in &current {
+                    let (low, _high) =
+                        consumer.fetch_watermarks(&o.topic, o.partition, wm_timeout)?;
+                    tpl.add_partition_offset(&o.topic, o.partition, Offset::Offset(low))?;
+                }
+            }
+            ResetStrategy::Latest => {
+                for o in &current {
+                    let (_low, high) =
+                        consumer.fetch_watermarks(&o.topic, o.partition, wm_timeout)?;
+                    tpl.add_partition_offset(&o.topic, o.partition, Offset::Offset(high))?;
+                }
+            }
+            ResetStrategy::ToOffset(target) => {
+                for o in &current {
+                    let (low, high) =
+                        consumer.fetch_watermarks(&o.topic, o.partition, wm_timeout)?;
+                    let clamped = (*target).clamp(low, high);
+                    tpl.add_partition_offset(&o.topic, o.partition, Offset::Offset(clamped))?;
+                }
+            }
+            ResetStrategy::ToTimestamp(ts_ms) => {
+                let mut request = TopicPartitionList::new();
+                for o in &current {
+                    request.add_partition_offset(&o.topic, o.partition, Offset::Offset(*ts_ms))?;
+                }
+                let resolved = consumer
+                    .offsets_for_times(request, Timeout::After(Duration::from_secs(15)))
+                    .context("offsets_for_times")?;
+                for elem in resolved.elements() {
+                    let off = match elem.offset() {
+                        Offset::Offset(n) => n,
+                        // нет сообщений после ts — ставим LEO (новые consumer-ы начнут с конца)
+                        _ => {
+                            let (_low, high) = consumer.fetch_watermarks(
+                                elem.topic(),
+                                elem.partition(),
+                                wm_timeout,
+                            )?;
+                            high
+                        }
+                    };
+                    tpl.add_partition_offset(elem.topic(), elem.partition(), Offset::Offset(off))?;
+                }
+            }
+        }
+
+        consumer
+            .commit(&tpl, CommitMode::Sync)
+            .context("commit reset offsets")?;
+        Ok(count)
+    }
+
+    pub fn delete_consumer_group(&self, group: &str) -> Result<()> {
+        let opts =
+            AdminOptions::new().operation_timeout(Some(Timeout::After(Duration::from_secs(30))));
+        let results = block_on(self.admin.delete_groups(&[group], &opts))?;
+        for r in results {
+            r.map_err(|(name, code)| anyhow::anyhow!("delete group '{name}': {code:?}"))?;
+        }
         Ok(())
     }
 }

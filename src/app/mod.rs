@@ -12,13 +12,14 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
 use crate::config::{clamp_live_poll_secs, AppConfig, ClusterConfig};
-use crate::kafka::{ClusterConnection, PartitionInfo};
-use crate::views::{MessagesView, TopicsView, ViewStack};
+use crate::kafka::{ClusterConnection, PartitionInfo, ResetStrategy};
+use crate::views::{GroupDetailsView, GroupsView, MessagesView, TopicsView, ViewStack};
 
 use modal::{draw_modal, layout_main, Modal, ModalField};
 use worker::{
-    spawn_create_topic, spawn_delete_topic, spawn_fetch_messages, spawn_list_topics,
-    spawn_poll_live_messages, spawn_produce, WorkerMsg,
+    spawn_create_topic, spawn_delete_group, spawn_delete_topic, spawn_fetch_messages,
+    spawn_group_offsets, spawn_list_groups, spawn_list_topics, spawn_poll_live_messages,
+    spawn_produce, spawn_reset_group_offsets, WorkerMsg,
 };
 
 pub struct App {
@@ -174,7 +175,16 @@ impl App {
                     Modal::Command => self.command_buf.push(c),
                     Modal::DeleteConfirm { .. } => {
                         if modal.is_yes(c) {
-                            self.confirm_delete();
+                            self.confirm_delete_topic();
+                        } else if c == 'n' || c == 'N' {
+                            self.close_modal();
+                        }
+                    }
+                    Modal::DeleteGroupConfirm { group } => {
+                        if modal.is_yes(c) {
+                            let group = group.clone();
+                            self.close_modal();
+                            self.run_delete_group(group);
                         } else if c == 'n' || c == 'N' {
                             self.close_modal();
                         }
@@ -202,8 +212,10 @@ impl App {
         match modal {
             Modal::Filter => {
                 let filter = self.filter_buf.clone();
-                if let ViewStack::Topics(v) = self.current_mut() {
-                    v.table.filter = filter;
+                match self.current_mut() {
+                    ViewStack::Topics(v) => v.table.filter = filter,
+                    ViewStack::Groups(v) => v.table.filter = filter,
+                    _ => {}
                 }
                 self.close_modal();
             }
@@ -259,6 +271,21 @@ impl App {
                 self.set_message_limit(limit);
                 self.close_modal();
             }
+            Modal::DeleteGroupConfirm { group } => {
+                self.run_delete_group(group);
+                self.close_modal();
+            }
+            Modal::ResetOffsets { group, spec } => {
+                let strategy = match parse_reset_spec(spec.trim()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        self.status = e;
+                        return;
+                    }
+                };
+                self.run_reset_offsets(group, strategy);
+                self.close_modal();
+            }
         }
     }
 
@@ -274,14 +301,17 @@ impl App {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('?') => self.toggle_help(),
             KeyCode::Char('r') => self.refresh_current(),
-            KeyCode::Char('/') => {
-                if matches!(self.current(), ViewStack::Topics(_)) {
-                    if let ViewStack::Topics(v) = self.current() {
-                        self.filter_buf = v.table.filter.clone();
-                    }
+            KeyCode::Char('/') => match self.current() {
+                ViewStack::Topics(v) => {
+                    self.filter_buf = v.table.filter.clone();
                     self.modal = Some(Modal::Filter);
                 }
-            }
+                ViewStack::Groups(v) => {
+                    self.filter_buf = v.table.filter.clone();
+                    self.modal = Some(Modal::Filter);
+                }
+                _ => {}
+            },
             KeyCode::Char(':') => {
                 self.command_buf.clear();
                 self.modal = Some(Modal::Command);
@@ -298,6 +328,17 @@ impl App {
             KeyCode::Char('d') => {
                 if let ViewStack::Messages(v) = self.current_mut() {
                     v.scroll_detail_down(3);
+                } else if let ViewStack::Groups(v) = self.current() {
+                    if let Some(group) = v.selected_group().cloned() {
+                        if !group.is_empty_or_dead() {
+                            self.status = format!(
+                                "cannot delete: group is {} (must be Empty/Dead)",
+                                group.state
+                            );
+                        } else {
+                            self.modal = Some(Modal::DeleteGroupConfirm { group: group.id });
+                        }
+                    }
                 } else if let Some(topic) = self.selected_topic_name() {
                     if topic.starts_with('_') {
                         self.status = "cannot delete internal topics".into();
@@ -391,6 +432,15 @@ impl App {
                 }
             }
             KeyCode::Char('y') => self.copy_selected_message(),
+            KeyCode::Char('g') => self.open_groups(),
+            KeyCode::Char('R') => {
+                if let Some(group) = self.selected_group_id() {
+                    self.modal = Some(Modal::ResetOffsets {
+                        group,
+                        spec: String::new(),
+                    });
+                }
+            }
             KeyCode::Char('u') => {
                 if matches!(self.current(), ViewStack::Messages(_)) {
                     if let ViewStack::Messages(v) = self.current_mut() {
@@ -417,10 +467,19 @@ impl App {
         match self.current() {
             ViewStack::Topics(v) => v.selected_topic().map(str::to_string),
             ViewStack::Messages(v) => Some(v.topic.clone()),
+            ViewStack::Groups(_) | ViewStack::GroupDetails(_) => None,
         }
     }
 
-    fn confirm_delete(&mut self) {
+    fn selected_group_id(&self) -> Option<String> {
+        match self.current() {
+            ViewStack::Groups(v) => v.selected_id().map(str::to_string),
+            ViewStack::GroupDetails(v) => Some(v.group.clone()),
+            _ => None,
+        }
+    }
+
+    fn confirm_delete_topic(&mut self) {
         if let Some(Modal::DeleteConfirm { topic }) = self.modal.clone() {
             self.run_delete_topic(topic);
             self.close_modal();
@@ -472,6 +531,8 @@ impl App {
         match self.current_mut() {
             ViewStack::Topics(v) => v.show_help = !v.show_help,
             ViewStack::Messages(v) => v.show_help = !v.show_help,
+            ViewStack::Groups(v) => v.show_help = !v.show_help,
+            ViewStack::GroupDetails(v) => v.show_help = !v.show_help,
         }
     }
 
@@ -479,6 +540,8 @@ impl App {
         match self.current_mut() {
             ViewStack::Topics(v) => v.table.next(),
             ViewStack::Messages(v) => v.next(),
+            ViewStack::Groups(v) => v.table.next(),
+            ViewStack::GroupDetails(v) => v.table.next(),
         }
     }
 
@@ -486,28 +549,44 @@ impl App {
         match self.current_mut() {
             ViewStack::Topics(v) => v.table.prev(),
             ViewStack::Messages(v) => v.prev(),
+            ViewStack::Groups(v) => v.table.prev(),
+            ViewStack::GroupDetails(v) => v.table.prev(),
         }
     }
 
     fn enter(&mut self) {
-        if let ViewStack::Topics(v) = self.current() {
-            if let Some(topic) = v.selected_topic() {
-                let topic = topic.to_string();
-                let limit = self.config.defaults.message_limit;
-                let mut mv = MessagesView::new(&topic, limit);
-                if let Some(conn) = self.connection.as_ref() {
-                    match conn.topic_partitions(&topic) {
-                        Ok(parts) => {
-                            mv.partition_ids = parts.iter().map(|p| p.id).collect();
-                        }
-                        Err(e) => {
-                            self.status = format!("partitions error: {e:#}");
+        match self.current() {
+            ViewStack::Topics(v) => {
+                if let Some(topic) = v.selected_topic() {
+                    let topic = topic.to_string();
+                    let limit = self.config.defaults.message_limit;
+                    let mut mv = MessagesView::new(&topic, limit);
+                    if let Some(conn) = self.connection.as_ref() {
+                        match conn.topic_partitions(&topic) {
+                            Ok(parts) => {
+                                mv.partition_ids = parts.iter().map(|p| p.id).collect();
+                            }
+                            Err(e) => {
+                                self.status = format!("partitions error: {e:#}");
+                            }
                         }
                     }
+                    self.stack.push(ViewStack::Messages(mv));
+                    self.reload_messages();
                 }
-                self.stack.push(ViewStack::Messages(mv));
-                self.reload_messages();
             }
+            ViewStack::Groups(v) => {
+                if let Some(id) = v.selected_id() {
+                    let id = id.to_string();
+                    let mut details = GroupDetailsView::new(&id);
+                    if let Some(g) = v.selected_group() {
+                        details.set_meta(g.state.clone(), g.members);
+                    }
+                    self.stack.push(ViewStack::GroupDetails(details));
+                    self.reload_group_offsets(id);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -570,7 +649,70 @@ impl App {
         match self.current() {
             ViewStack::Topics(_) => self.refresh_topics(),
             ViewStack::Messages(_) => self.reload_messages(),
+            ViewStack::Groups(_) => self.refresh_groups(),
+            ViewStack::GroupDetails(v) => {
+                let group = v.group.clone();
+                self.reload_group_offsets(group);
+            }
         }
+    }
+
+    fn refresh_groups(&mut self) {
+        let Some(conn) = self.connection.as_ref() else {
+            self.status = "not connected".into();
+            return;
+        };
+        self.loading = true;
+        self.status = "loading consumer groups…".into();
+        if let Ok(conn) = conn.reconnect() {
+            spawn_list_groups(conn, self.worker_tx.clone());
+        }
+    }
+
+    fn reload_group_offsets(&mut self, group: String) {
+        let Some(conn) = self.connection.as_ref() else {
+            self.status = "not connected".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("loading offsets for {group}…");
+        if let Ok(conn) = conn.reconnect() {
+            spawn_group_offsets(conn, group, self.worker_tx.clone());
+        }
+    }
+
+    fn open_groups(&mut self) {
+        if matches!(self.current(), ViewStack::Topics(_)) {
+            self.stack.push(ViewStack::Groups(GroupsView::new()));
+            self.refresh_groups();
+        }
+    }
+
+    fn run_delete_group(&mut self, group: String) {
+        let Some(conn) = self.connection.as_ref() else {
+            self.status = "not connected".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("deleting group {group}…");
+        if let Ok(conn) = conn.reconnect() {
+            spawn_delete_group(conn, group, self.worker_tx.clone());
+        }
+    }
+
+    fn run_reset_offsets(&mut self, group: String, strategy: ResetStrategy) {
+        if self.connection.is_none() {
+            self.status = "not connected".into();
+            return;
+        }
+        self.loading = true;
+        self.status = format!("resetting offsets for {group}…");
+        spawn_reset_group_offsets(
+            self.cluster.clone(),
+            group,
+            strategy,
+            self.worker_tx.clone(),
+        );
     }
 
     fn refresh_topics(&mut self) {
@@ -703,15 +845,50 @@ impl App {
                     Err(e) => self.status = format!("live error: {e:#}"),
                 }
             }
+            WorkerMsg::Groups(Ok(groups)) => {
+                if let ViewStack::Groups(v) = self.current_mut() {
+                    v.load(groups);
+                }
+                self.status = "ready".into();
+            }
+            WorkerMsg::Groups(Err(e)) => self.status = format!("groups error: {e:#}"),
+            WorkerMsg::GroupOffsets { group, result } => match result {
+                Ok((info, offsets)) => {
+                    let n = offsets.len();
+                    let total_lag: i64 = offsets.iter().map(|o| o.lag).sum();
+                    if let ViewStack::GroupDetails(v) = self.current_mut() {
+                        if v.group == group {
+                            v.set_meta(info.state.clone(), info.members);
+                            v.load(offsets);
+                        }
+                    }
+                    self.status = format!(
+                        "{group} · {} · {n} part · total lag {total_lag}",
+                        info.state
+                    );
+                }
+                Err(e) => self.status = format!("offsets error: {e:#}"),
+            },
             WorkerMsg::Op(Ok(msg)) => {
-                let reload_msgs = msg.contains("produced");
+                let is_produce = msg.starts_with("produced");
+                let is_topic_op =
+                    msg.starts_with("created topic") || msg.starts_with("deleted topic");
+                let is_group_op = msg.starts_with("deleted group");
+                let is_reset = msg.starts_with("reset offsets");
                 self.status = msg;
-                self.refresh_topics();
-                if reload_msgs {
-                    if let ViewStack::Messages(v) = self.current() {
+
+                match self.current() {
+                    ViewStack::Topics(_) if is_topic_op || is_produce => self.refresh_topics(),
+                    ViewStack::Messages(v) if is_produce => {
                         let topic = v.topic.clone();
                         self.reload_messages_for(&topic);
                     }
+                    ViewStack::Groups(_) if is_group_op || is_reset => self.refresh_groups(),
+                    ViewStack::GroupDetails(v) if is_reset => {
+                        let g = v.group.clone();
+                        self.reload_group_offsets(g);
+                    }
+                    _ => {}
                 }
             }
             WorkerMsg::Op(Err(e)) => self.status = format!("error: {e:#}"),
@@ -733,6 +910,8 @@ impl App {
         let show_help = match self.current() {
             ViewStack::Topics(v) => v.show_help,
             ViewStack::Messages(v) => v.show_help,
+            ViewStack::Groups(v) => v.show_help,
+            ViewStack::GroupDetails(v) => v.show_help,
         };
         let chunks = layout_main(area, show_help);
 
@@ -741,6 +920,12 @@ impl App {
                 frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
             ),
             ViewStack::Messages(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::Groups(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::GroupDetails(v) => v.render(
                 frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
             ),
         }
@@ -804,4 +989,40 @@ fn format_partitions(parts: &[PartitionInfo]) -> Vec<String> {
         ));
     }
     lines
+}
+
+/// Парсит строку формата `earliest` / `latest` / `offset:N` / `timestamp:UNIX_MS`
+/// в `ResetStrategy`. Ошибка возвращается как пользовательская строка статуса.
+fn parse_reset_spec(spec: &str) -> Result<ResetStrategy, String> {
+    let spec = spec.trim();
+    if spec.eq_ignore_ascii_case("earliest") {
+        return Ok(ResetStrategy::Earliest);
+    }
+    if spec.eq_ignore_ascii_case("latest") {
+        return Ok(ResetStrategy::Latest);
+    }
+    if let Some(rest) = spec
+        .strip_prefix("offset:")
+        .or_else(|| spec.strip_prefix("offset="))
+    {
+        let n: i64 = rest
+            .trim()
+            .parse()
+            .map_err(|_| format!("invalid offset '{rest}', expected integer"))?;
+        return Ok(ResetStrategy::ToOffset(n));
+    }
+    if let Some(rest) = spec
+        .strip_prefix("timestamp:")
+        .or_else(|| spec.strip_prefix("timestamp="))
+        .or_else(|| spec.strip_prefix("ts:"))
+    {
+        let n: i64 = rest
+            .trim()
+            .parse()
+            .map_err(|_| format!("invalid timestamp '{rest}', expected unix millis"))?;
+        return Ok(ResetStrategy::ToTimestamp(n));
+    }
+    Err(format!(
+        "invalid spec '{spec}'; use earliest | latest | offset:N | timestamp:UNIX_MS"
+    ))
 }

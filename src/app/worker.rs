@@ -5,7 +5,9 @@ use std::thread;
 use anyhow::Result;
 
 use crate::config::ClusterConfig;
-use crate::kafka::{ClusterConnection, FetchedMessage, TopicInfo};
+use crate::kafka::{
+    ClusterConnection, ConsumerGroupInfo, FetchedMessage, GroupOffset, ResetStrategy, TopicInfo,
+};
 
 pub enum WorkerMsg {
     Topics(Result<Vec<TopicInfo>>),
@@ -16,6 +18,11 @@ pub enum WorkerMsg {
     LiveMessages {
         topic: String,
         result: Result<Vec<FetchedMessage>>,
+    },
+    Groups(Result<Vec<ConsumerGroupInfo>>),
+    GroupOffsets {
+        group: String,
+        result: Result<(ConsumerGroupInfo, Vec<GroupOffset>)>,
     },
     Op(Result<String>),
 }
@@ -100,6 +107,44 @@ pub fn spawn_produce(
         let result = conn
             .produce_message(&topic, key_ref, &payload)
             .map(|_| format!("produced to '{topic}' ({} bytes)", payload.len()));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_list_groups(conn: ClusterConnection, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let _ = tx.send(WorkerMsg::Groups(conn.list_consumer_groups()));
+    });
+}
+
+pub fn spawn_group_offsets(conn: ClusterConnection, group: String, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = conn
+            .describe_group(&group)
+            .and_then(|info| conn.group_offsets(&group).map(|offsets| (info, offsets)));
+        let _ = tx.send(WorkerMsg::GroupOffsets { group, result });
+    });
+}
+
+pub fn spawn_reset_group_offsets(
+    cluster: ClusterConfig,
+    group: String,
+    strategy: ResetStrategy,
+    tx: mpsc::Sender<WorkerMsg>,
+) {
+    thread::spawn(move || {
+        let result = ClusterConnection::connect(&cluster)
+            .and_then(|conn| conn.reset_group_offsets(&group, &strategy))
+            .map(|n| format!("reset offsets for '{group}' ({n} partitions)"));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_delete_group(conn: ClusterConnection, group: String, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = conn
+            .delete_consumer_group(&group)
+            .map(|_| format!("deleted group '{group}'"));
         let _ = tx.send(WorkerMsg::Op(result));
     });
 }

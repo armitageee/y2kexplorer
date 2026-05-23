@@ -9,6 +9,9 @@ Terminal UI для Apache Kafka — по духу близко к [k9s](https://
 - **Отправка сообщений** (`n`) — key + payload
 - **Создание / удаление топиков** (`c` / `d`)
 - Метаданные партиций (Topics: `p`, Messages: `i`)
+- **Consumer groups** (`g` / `:groups`): список, состояние, members, lag по партициям
+- **Reset offsets** (`R`): `earliest` / `latest` / `offset:N` / `timestamp:UNIX_MS`
+- **Удаление пустых групп** (`d` на Groups)
 - Аутентификация: PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) через keytab**
 
 ## Установка
@@ -197,11 +200,35 @@ y2k --cluster secure    # кластер из [clusters.<name>]
 | `[` / `]` | — | интервал live-poll ±1 с (1–30, в config) |
 | `:limit N` | — | лимит сообщений |
 | `:poll N` | — | интервал live-poll (секунды) |
+| `g` | открыть Consumer Groups | — |
 | `Tab` | в модалке — следующее поле | |
-| `:` | command (`context`, `clusters`) | command |
+| `:` | command (`context`, `clusters`, `groups`) | command |
 | `Esc` | назад / закрыть модалку | назад |
 | `?` | полная справка | полная справка |
 | `q` | выход | выход |
+
+### Consumer groups
+
+| Клавиша | Groups | Group details |
+|---------|--------|---------------|
+| `j` / `k`, `↑` / `↓` | навигация | навигация |
+| `/` | фильтр по id | — |
+| `Enter` | детали (offsets/lag) | — |
+| `R` | reset offsets | reset offsets |
+| `d` | удалить группу (только Empty/Dead) | — |
+| `r` | обновить | обновить |
+| `Esc` | назад | назад |
+
+`R` открывает модалку с полем **spec**. Принимает:
+
+| spec | Что делает |
+|------|------------|
+| `earliest` | сдвинуть на low watermark всех партиций |
+| `latest` | сдвинуть на high watermark (LEO) |
+| `offset:N` | абсолютный N (клампится в `[low, high]` каждой партиции) |
+| `timestamp:UNIX_MS` | первый offset с `timestamp >= UNIX_MS` (через `offsets_for_times`) |
+
+> **Важно:** Reset работает **только когда у группы нет активных consumer-ов** (state ∈ {`Empty`, `Dead`}). Иначе брокер вернёт `REBALANCE_IN_PROGRESS`. Перед reset остановите всех потребителей этой группы. y2kexplorer проверяет state до коммита и возвращает понятное сообщение, если группа активна.
 
 Нижняя панель (status + keys) использует контрастную схему (синий фон, яркие подписи клавиш) — хорошо читается на серых темах терминала.
 
@@ -269,10 +296,9 @@ src/
 
 ## Дальнейшее развитие
 
-- Consumer groups, lag, members
 - Produce: headers, выбор partition
-- Просмотр по offset / partition
-- `:command` режим и алиасы (как в k9s)
+- Просмотр сообщений по offset (jump to offset)
+- Members per consumer group + assignment (rebalance view)
 - Schema Registry, ACL (по необходимости)
 
 ## Лицензия
