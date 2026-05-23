@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".assets/y2kexplorer.png" width="560" alt="y2kexplorer mascot">
+  <img src=".assets/y2kagent.png" width="560" alt="y2kexplorer mascot">
 </p>
 
 <h1 align="center">y2kexplorer</h1>
