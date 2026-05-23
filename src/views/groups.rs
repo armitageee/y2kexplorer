@@ -1,7 +1,7 @@
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
-use crate::kafka::TopicInfo;
+use crate::kafka::ConsumerGroupInfo;
 use crate::ui::{draw_help, draw_status, TableView};
 
 const HELP: &[&str] = &[
@@ -12,17 +12,15 @@ const HELP: &[&str] = &[
     "/",
     "filter",
     "Enter",
-    "messages",
-    "n",
-    "produce",
-    "c",
-    "create",
+    "details",
+    "R",
+    "reset offsets",
     "d",
     "delete",
-    "p",
-    "partitions",
     "r",
     "refresh",
+    "Esc",
+    "back",
     "?",
     "help",
     "q",
@@ -30,54 +28,58 @@ const HELP: &[&str] = &[
 ];
 
 const HINT: &[&str] = &[
-    ":", "context", "Enter", "open", "n", "produce", "c", "create", "d", "delete", "/", "filter",
-    "?", "help",
+    "Enter", "details", "R", "reset", "d", "delete", "/", "filter", "Esc", "back", "?", "help",
 ];
 
-pub struct TopicsView {
+pub struct GroupsView {
     pub table: TableView,
     pub show_help: bool,
-    pub topic_infos: Vec<TopicInfo>,
+    pub groups: Vec<ConsumerGroupInfo>,
 }
 
-impl TopicsView {
+impl GroupsView {
     pub fn new() -> Self {
         Self {
             table: TableView::new(
-                "Topics",
+                "Consumer Groups",
                 vec![
-                    "NAME".into(),
-                    "MESSAGES".into(),
-                    "PARTITIONS".into(),
-                    "REPLICATION".into(),
-                    "INTERNAL".into(),
+                    "ID".into(),
+                    "STATE".into(),
+                    "MEMBERS".into(),
+                    "PROTOCOL".into(),
+                    "TYPE".into(),
                 ],
             ),
             show_help: false,
-            topic_infos: Vec::new(),
+            groups: Vec::new(),
         }
     }
 
-    pub fn load(&mut self, topics: Vec<TopicInfo>) {
-        self.topic_infos = topics.clone();
-        let rows = topics
+    pub fn load(&mut self, groups: Vec<ConsumerGroupInfo>) {
+        self.groups = groups.clone();
+        let rows = groups
             .into_iter()
-            .map(|t| {
+            .map(|g| {
                 vec![
-                    t.name,
-                    t.message_count.to_string(),
-                    t.partitions.to_string(),
-                    t.replication.to_string(),
-                    if t.internal { "yes" } else { "" }.into(),
+                    g.id,
+                    g.state,
+                    g.members.to_string(),
+                    g.protocol,
+                    g.protocol_type,
                 ]
             })
             .collect();
         self.table.set_rows(rows);
     }
 
-    pub fn selected_topic(&self) -> Option<&str> {
+    pub fn selected_id(&self) -> Option<&str> {
         let row = self.table.selected_row()?;
         row.first().map(String::as_str)
+    }
+
+    pub fn selected_group(&self) -> Option<&ConsumerGroupInfo> {
+        let id = self.selected_id()?;
+        self.groups.iter().find(|g| g.id == id)
     }
 
     #[allow(clippy::too_many_arguments)]

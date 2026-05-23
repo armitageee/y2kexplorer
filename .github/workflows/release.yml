@@ -21,35 +21,15 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            os: ubuntu-latest
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             features: --all-features
             deps: linux
-            archive: tar.gz
-          - name: linux-aarch64
-            os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            features: --all-features
-            deps: linux-cross
-            archive: tar.gz
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
             features: --all-features
             deps: macos
-            archive: tar.gz
-          - name: macos-x86_64
-            os: macos-13
-            target: x86_64-apple-darwin
-            features: --all-features
-            deps: macos
-            archive: tar.gz
-          - name: windows-x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            features: --no-default-features
-            deps: windows
-            archive: zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -58,16 +38,12 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install dependencies (Linux)
-        if: matrix.deps == 'linux' || matrix.deps == 'linux-cross'
+        if: matrix.deps == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config libssl-dev libsasl2-dev zlib1g-dev \
-            libzstd-dev liblz4-dev
-          if [ "${{ matrix.deps }}" = "linux-cross" ]; then
-            sudo apt-get install -y --no-install-recommends \
-              gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          fi
+            libzstd-dev liblz4-dev libcurl4-openssl-dev
 
       - name: Install dependencies (macOS)
         if: matrix.deps == 'macos'
@@ -77,74 +53,71 @@ jobs:
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix cyrus-sasl)/lib/pkgconfig:$(brew --prefix krb5)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl@3);$(brew --prefix cyrus-sasl);$(brew --prefix krb5)" >> "$GITHUB_ENV"
 
-      - name: Install dependencies (Windows)
-        if: matrix.deps == 'windows'
-        run: |
-          choco install cmake openssl --no-progress -y
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $env:GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=C:\Program Files\OpenSSL\lib" >> $env:GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=C:\Program Files\OpenSSL\include" >> $env:GITHUB_ENV
-
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-${{ matrix.target }}
+          # Бампим суффикс при изменении runner-а / системных библиотек,
+          # чтобы инвалидировать stale target/ от предыдущих сборок.
+          shared-key: release-${{ matrix.target }}-u2204
+          cache-on-failure: false
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
       - name: Build
-        if: matrix.deps != 'linux-cross'
-        run: |
-          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
-            --target ${{ matrix.target }}
+        run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
 
-      - name: Build (cross aarch64)
-        if: matrix.deps == 'linux-cross'
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-        run: |
-          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
-            --target ${{ matrix.target }}
+      - name: Bundle dynamic libs (macOS)
+        if: matrix.deps == 'macos'
+        run: brew install dylibbundler
 
-      - name: Package (Unix)
-        if: matrix.archive == 'tar.gz'
+      - name: Package
         run: |
+          set -euxo pipefail
           TARGET="${{ matrix.target }}"
           VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p "y2kexplorer-${VERSION}-${TARGET}"
-          cp "target/${TARGET}/release/y2k" "y2kexplorer-${VERSION}-${TARGET}/"
-          cp "target/${TARGET}/release/y2k-probe" "y2kexplorer-${VERSION}-${TARGET}/"
-          cp README.md config.example.toml "y2kexplorer-${VERSION}-${TARGET}/"
-          chmod +x "y2kexplorer-${VERSION}-${TARGET}/y2k" "y2kexplorer-${VERSION}-${TARGET}/y2k-probe"
-          tar -czvf "y2kexplorer-${VERSION}-${TARGET}.tar.gz" "y2kexplorer-${VERSION}-${TARGET}"
+          DIR="y2kexplorer-${VERSION}-${TARGET}"
+          mkdir -p "${DIR}"
+          cp "target/${TARGET}/release/y2k" "${DIR}/"
+          cp "target/${TARGET}/release/y2k-probe" "${DIR}/"
+          cp README.md config.example.toml "${DIR}/"
+          chmod +x "${DIR}/y2k" "${DIR}/y2k-probe"
 
-      - name: Package (Windows)
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $target = "${{ matrix.target }}"
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          $dir = "y2kexplorer-$version-$target"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          Copy-Item "target\$target\release\y2k.exe" "$dir\"
-          Copy-Item "target\$target\release\y2k-probe.exe" "$dir\"
-          Copy-Item README.md, config.example.toml "$dir\"
-          Compress-Archive -Path $dir -DestinationPath "y2kexplorer-$version-$target.zip"
+          if [ "${{ matrix.deps }}" = "macos" ]; then
+            mkdir -p "${DIR}/lib"
+            ( cd "${DIR}" && dylibbundler -of -b \
+              -x ./y2k -x ./y2k-probe \
+              -d ./lib -p '@executable_path/lib/' )
+
+            # install_name_tool инвалидирует подпись каждого dylib, а на arm64
+            # macOS любой Mach-O без валидной подписи отвергается dyld
+            # ("library load disallowed by system policy"). Подписываем ad-hoc
+            # сами, чтобы не зависеть от того, доходит ли до этого dylibbundler.
+            for f in "${DIR}"/lib/*.dylib; do
+              codesign --force --sign - "$f"
+            done
+            codesign --force --sign - "${DIR}/y2k" "${DIR}/y2k-probe"
+
+            echo "--- otool -L y2k ---"
+            otool -L "${DIR}/y2k"
+            echo "--- codesign verify ---"
+            codesign --verify --verbose=2 "${DIR}/y2k"
+            codesign --verify --verbose=2 "${DIR}/lib/libsasl2.3.dylib" || true
+          fi
+
+          tar -czvf "${DIR}.tar.gz" "${DIR}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}
-          path: |
-            y2kexplorer-*.tar.gz
-            y2kexplorer-*.zip
+          path: y2kexplorer-*.tar.gz
 
   github-release:
     name: publish GitHub Release
     needs: build-release
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -154,9 +127,19 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | sort
 
+      - name: Render install notes
+        run: |
+          set -euxo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          sed -e "s/__TAG__/${TAG}/g" -e "s/__VERSION__/${VERSION}/g" \
+            .github/release-notes-template.md > install-notes.md
+          echo "--- install-notes.md ---"
+          cat install-notes.md
+
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            artifacts/**/*.tar.gz
-            artifacts/**/*.zip
+          append_body: true
+          body_path: install-notes.md
+          files: artifacts/**/*.tar.gz

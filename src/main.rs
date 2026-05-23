@@ -1,9 +1,12 @@
+// Часть тем/таблиц/экранов готовится для следующих view (consumer groups, ACL и т.п.).
+#![allow(dead_code)]
+
 mod app;
 mod ui;
 mod views;
 
-pub use y2kexplorer::config as config;
-pub use y2kexplorer::kafka as kafka;
+pub use y2kexplorer::config;
+pub use y2kexplorer::kafka;
 
 use std::path::PathBuf;
 use std::sync::mpsc;

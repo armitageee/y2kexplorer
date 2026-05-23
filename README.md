@@ -9,9 +9,73 @@ Terminal UI для Apache Kafka — по духу близко к [k9s](https://
 - **Отправка сообщений** (`n`) — key + payload
 - **Создание / удаление топиков** (`c` / `d`)
 - Метаданные партиций (Topics: `p`, Messages: `i`)
+- **Consumer groups** (`g` / `:groups`): список, состояние, members, lag по партициям
+- **Reset offsets** (`R`): `earliest` / `latest` / `offset:N` / `timestamp:UNIX_MS`
+- **Удаление пустых групп** (`d` на Groups)
 - Аутентификация: PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) через keytab**
 
-## Требования для сборки
+## Установка
+
+### Готовые бинарники из GitHub Releases
+
+Каждый тег `v*` собирает self-contained тарбол под две платформы.
+
+#### macOS (Apple Silicon, arm64)
+
+```bash
+TAG=v0.0.2-rc        # подставить актуальный
+VER=${TAG#v}
+curl -LO "https://github.com/armitageee/y2kexplorer/releases/download/${TAG}/y2kexplorer-${VER}-aarch64-apple-darwin.tar.gz"
+tar -xzf "y2kexplorer-${VER}-aarch64-apple-darwin.tar.gz"
+cd "y2kexplorer-${VER}-aarch64-apple-darwin"
+
+# снять карантин Gatekeeper, если архив скачан через браузер
+xattr -dr com.apple.quarantine .
+
+./y2k --help
+```
+
+Все нужные `.dylib` (`libsasl2`, `libssl`, `libcrypto`, `libkrb5`, `libcurl`…) лежат в `lib/` рядом с бинарником и подгружаются через `@executable_path/lib/...`. `brew install cyrus-sasl krb5 openssl@3` **не требуется**.
+
+> Если выскочит `library load disallowed by system policy` — значит, в этом релизе CI-подпись не доехала до dylib. Подписать ad-hoc вручную:
+> ```bash
+> codesign --force --sign - lib/*.dylib
+> codesign --force --sign - y2k y2k-probe
+> ```
+
+#### Linux (x86_64)
+
+Собран на Ubuntu 22.04 (glibc 2.35), совместим с **Ubuntu 22.04+**, **Debian 12+**, **RHEL/Rocky/Alma 9+**, **Fedora 36+**, **openSUSE Leap 15.5+**, Arch.
+
+```bash
+# 1. Системные зависимости (один раз)
+sudo apt install libsasl2-2 libssl3 libkrb5-3 libcurl4   # Debian/Ubuntu
+# или
+sudo dnf install cyrus-sasl-lib openssl-libs krb5-libs libcurl  # Fedora/RHEL
+
+# 2. Скачать и запустить
+TAG=v0.0.2-rc
+VER=${TAG#v}
+curl -LO "https://github.com/armitageee/y2kexplorer/releases/download/${TAG}/y2kexplorer-${VER}-x86_64-unknown-linux-gnu.tar.gz"
+tar -xzf "y2kexplorer-${VER}-x86_64-unknown-linux-gnu.tar.gz"
+cd "y2kexplorer-${VER}-x86_64-unknown-linux-gnu"
+./y2k --help
+```
+
+> Не работает на Ubuntu 20.04 / Debian 11 / RHEL 8 / Alpine (старая glibc или musl). Для них собирайте локально из исходников.
+
+### Конфигурация после установки
+
+```bash
+mkdir -p ~/.config/y2kexplorer
+cp config.example.toml ~/.config/y2kexplorer/config.toml
+$EDITOR ~/.config/y2kexplorer/config.toml
+./y2k                            # дефолтный кластер
+./y2k --cluster <name>           # из [clusters.<name>]
+./y2k-probe --cluster <name>     # smoke-тест подключения без TUI
+```
+
+## Требования для сборки из исходников
 
 - Rust 1.75+
 - CMake, zlib (для сборки librdkafka через `rdkafka/cmake-build`)
@@ -19,10 +83,10 @@ Terminal UI для Apache Kafka — по духу близко к [k9s](https://
 
 ```bash
 # macOS (Homebrew)
-brew install cmake openssl
+brew install cmake openssl@3 cyrus-sasl krb5
 
 # Debian/Ubuntu
-sudo apt install cmake libsasl2-dev libssl-dev pkg-config
+sudo apt install cmake pkg-config libsasl2-dev libssl-dev libkrb5-dev libcurl4-openssl-dev
 ```
 
 ## Тестовый кластер (Docker)
@@ -59,10 +123,14 @@ cargo run --release
 | [CI](.github/workflows/ci.yml) | push/PR в `main`, `master`, `develop` | `fmt`, `clippy`, `test`, сборка на 5 платформах |
 | [Release](.github/workflows/release.yml) | тег `v*` (например `v0.1.0`) | release-артефакты в GitHub Releases |
 
-**Платформы сборки:** `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`, `windows-x86_64`.
+**Платформы сборки:** `linux-x86_64`, `macos-arm64` (полный функционал: SASL + SSL + Kerberos/GSSAPI).
 
-- Linux/macOS: полный функционал (SASL + SSL + **Kerberos/GSSAPI**, feature `gssapi`).
-- Windows: сборка `--no-default-features` (без GSSAPI; PLAIN/SCRAM/SSL). Kerberos на Windows — отдельно при необходимости.
+- **macOS (arm64):** артефакт self-contained — все нужные `.dylib` (`libsasl2`, `libssl`, `libcrypto`, `libkrb5`, `libcurl`…) кладутся рядом с бинарником в `lib/` и подменяются на `@executable_path/lib/...` через `dylibbundler`. Запуск возможен без brew.
+- **Linux (x86_64):** сборка на `ubuntu-22.04`, чтобы glibc/`libssl3`/`libsasl2-2` были совместимы с большинством современных дистрибутивов (Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora 36+). Системные пакеты должны быть установлены: `apt install libsasl2-2 libssl3 libkrb5-3 libcurl4`.
+
+> `linux-aarch64` и `windows-x86_64` отключены: librdkafka 2.12 + Cyrus SASL на этих платформах требуют либо ARM-runner / [`cross-rs`](https://github.com/cross-rs/cross), либо `vendored` сборки `sasl2-sys` на MSVC. Для Windows используйте WSL.
+
+> Инструкция по установке готовых бинарников и снятию карантина macOS — см. секцию [Установка](#установка) выше.
 
 Локально как в CI (Linux):
 
@@ -132,11 +200,35 @@ y2k --cluster secure    # кластер из [clusters.<name>]
 | `[` / `]` | — | интервал live-poll ±1 с (1–30, в config) |
 | `:limit N` | — | лимит сообщений |
 | `:poll N` | — | интервал live-poll (секунды) |
+| `g` | открыть Consumer Groups | — |
 | `Tab` | в модалке — следующее поле | |
-| `:` | command (`context`, `clusters`) | command |
+| `:` | command (`context`, `clusters`, `groups`) | command |
 | `Esc` | назад / закрыть модалку | назад |
 | `?` | полная справка | полная справка |
 | `q` | выход | выход |
+
+### Consumer groups
+
+| Клавиша | Groups | Group details |
+|---------|--------|---------------|
+| `j` / `k`, `↑` / `↓` | навигация | навигация |
+| `/` | фильтр по id | — |
+| `Enter` | детали (offsets/lag) | — |
+| `R` | reset offsets | reset offsets |
+| `d` | удалить группу (только Empty/Dead) | — |
+| `r` | обновить | обновить |
+| `Esc` | назад | назад |
+
+`R` открывает модалку с полем **spec**. Принимает:
+
+| spec | Что делает |
+|------|------------|
+| `earliest` | сдвинуть на low watermark всех партиций |
+| `latest` | сдвинуть на high watermark (LEO) |
+| `offset:N` | абсолютный N (клампится в `[low, high]` каждой партиции) |
+| `timestamp:UNIX_MS` | первый offset с `timestamp >= UNIX_MS` (через `offsets_for_times`) |
+
+> **Важно:** Reset работает **только когда у группы нет активных consumer-ов** (state ∈ {`Empty`, `Dead`}). Иначе брокер вернёт `REBALANCE_IN_PROGRESS`. Перед reset остановите всех потребителей этой группы. y2kexplorer проверяет state до коммита и возвращает понятное сообщение, если группа активна.
 
 Нижняя панель (status + keys) использует контрастную схему (синий фон, яркие подписи клавиш) — хорошо читается на серых темах терминала.
 
@@ -204,10 +296,9 @@ src/
 
 ## Дальнейшее развитие
 
-- Consumer groups, lag, members
 - Produce: headers, выбор partition
-- Просмотр по offset / partition
-- `:command` режим и алиасы (как в k9s)
+- Просмотр сообщений по offset (jump to offset)
+- Members per consumer group + assignment (rebalance view)
 - Schema Registry, ACL (по необходимости)
 
 ## Лицензия

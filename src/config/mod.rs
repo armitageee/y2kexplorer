@@ -99,9 +99,7 @@ fn default_true() -> bool {
 /// CA для Kerberos+TLS: явный `ssl_ca`, иначе первый существующий путь из `krb5.conf` (pkinit_*).
 pub fn resolve_kerberos_ssl_ca(auth: &AuthConfig) -> Option<String> {
     let AuthConfig::Kerberos {
-        ssl_ca,
-        krb5_conf,
-        ..
+        ssl_ca, krb5_conf, ..
     } = auth
     else {
         return None;
@@ -133,7 +131,7 @@ pub fn krb5_ca_candidates(krb5_conf: &Path) -> Vec<String> {
         if let Some(i) = trimmed.find("FILE:") {
             let p = trimmed[i + 5..]
                 .trim()
-                .trim_end_matches(|c| c == '}' || c == ',' || c == '"' || c == ';');
+                .trim_end_matches(['}', ',', '"', ';']);
             if !p.is_empty() {
                 out.push(p.to_string());
             }
@@ -147,9 +145,7 @@ pub fn krb5_ca_candidates(krb5_conf: &Path) -> Vec<String> {
 /// Kerberos через keytab: krb5.conf + отдельный FILE ccache (не macOS UUID cache).
 pub fn apply_kerberos_env(auth: &AuthConfig) {
     let AuthConfig::Kerberos {
-        keytab,
-        krb5_conf,
-        ..
+        keytab, krb5_conf, ..
     } = auth
     else {
         return;

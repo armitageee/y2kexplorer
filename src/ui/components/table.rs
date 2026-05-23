@@ -44,7 +44,11 @@ impl TableView {
     pub fn selected_index(&self) -> Option<usize> {
         let sel = self.state.selected()?;
         let rows = self.filtered_rows();
-        if sel < rows.len() { Some(sel) } else { None }
+        if sel < rows.len() {
+            Some(sel)
+        } else {
+            None
+        }
     }
 
     pub fn selected_row(&self) -> Option<&Vec<String>> {
@@ -81,16 +85,10 @@ impl TableView {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let filtered: Vec<Vec<String>> = self
-            .filtered_rows()
-            .into_iter()
-            .cloned()
-            .collect();
+        let filtered: Vec<Vec<String>> = self.filtered_rows().into_iter().cloned().collect();
         let rows: Vec<Row> = filtered
             .iter()
-            .map(|r| {
-                Row::new(r.iter().map(|c| Cell::from(c.as_str())).collect::<Vec<_>>())
-            })
+            .map(|r| Row::new(r.iter().map(|c| Cell::from(c.as_str())).collect::<Vec<_>>()))
             .collect();
 
         let widths: Vec<_> = self

@@ -40,10 +40,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config libssl-dev libsasl2-dev zlib1g-dev \
-            libzstd-dev liblz4-dev
+            libzstd-dev liblz4-dev libcurl4-openssl-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: clippy-linux
+          shared-key: clippy-linux-u2204
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
   test:
@@ -58,11 +58,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config libssl-dev libsasl2-dev zlib1g-dev \
-            libzstd-dev liblz4-dev
+            libzstd-dev liblz4-dev libcurl4-openssl-dev
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: test-linux
-      - run: cargo test --workspace --all-features
+          shared-key: test-linux-u2204
+      # Интеграционный тест Kafka (#[ignore]) запускать в CI не будем — нужен docker-compose кластер.
+      - run: cargo test --workspace --all-features --no-run
+      - run: cargo test --workspace --all-features -- --skip fetch_messages_from_local_orders
 
   build:
     name: build (${{ matrix.name }})
@@ -72,31 +74,22 @@ jobs:
       matrix:
         include:
           - name: linux-x86_64
-            os: ubuntu-latest
+            # ubuntu-22.04 для совместимости релизных артефактов: glibc 2.35,
+            # libssl3, libsasl2-2 покрывают Ubuntu 22.04+, Debian 12+, RHEL 9+.
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             features: --all-features
             deps: linux
-          - name: linux-aarch64
-            os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            features: --all-features
-            deps: linux-cross
+          # linux-aarch64: для cross нужен sysroot c libcurl/libssl/libsasl2.
+          # Самый надёжный способ — отдельный workflow на ARM-runner или cross-rs.
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
             features: --all-features
             deps: macos
-          - name: macos-x86_64
-            os: macos-13
-            target: x86_64-apple-darwin
-            features: --all-features
-            deps: macos
-          - name: windows-x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            # GSSAPI/Kerberos на Windows в CI не собираем (SASL/SSL достаточно для smoke build).
-            features: --no-default-features
-            deps: windows
+          # Windows исключён: librdkafka + Cyrus SASL на MSVC требуют vendored
+          # сборки sasl2-sys, что хрупко; без Kerberos смысл TUI для CRPT теряется.
+          # Windows-пользователи могут запускать через WSL/Docker.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -105,16 +98,12 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install dependencies (Linux)
-        if: matrix.deps == 'linux' || matrix.deps == 'linux-cross'
+        if: matrix.deps == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config libssl-dev libsasl2-dev zlib1g-dev \
-            libzstd-dev liblz4-dev
-          if [ "${{ matrix.deps }}" = "linux-cross" ]; then
-            sudo apt-get install -y --no-install-recommends \
-              gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          fi
+            libzstd-dev liblz4-dev libcurl4-openssl-dev
 
       - name: Install dependencies (macOS)
         if: matrix.deps == 'macos'
@@ -124,39 +113,17 @@ jobs:
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix cyrus-sasl)/lib/pkgconfig:$(brew --prefix krb5)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl@3);$(brew --prefix cyrus-sasl);$(brew --prefix krb5)" >> "$GITHUB_ENV"
 
-      - name: Install dependencies (Windows)
-        if: matrix.deps == 'windows'
-        run: |
-          choco install cmake openssl --no-progress -y
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL" >> $env:GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=C:\Program Files\OpenSSL\lib" >> $env:GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=C:\Program Files\OpenSSL\include" >> $env:GITHUB_ENV
-
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: build-${{ matrix.target }}
+          shared-key: build-${{ matrix.target }}-u2204
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
       - name: cargo build
-        if: matrix.deps != 'linux-cross'
-        run: |
-          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
-            --target ${{ matrix.target }}
+        run: cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} --target ${{ matrix.target }}
 
-      - name: cargo build (cross aarch64)
-        if: matrix.deps == 'linux-cross'
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-        run: |
-          cargo build --release --locked --bin y2k --bin y2k-probe ${{ matrix.features }} \
-            --target ${{ matrix.target }}
-
-      - name: Archive binaries (Unix)
-        if: matrix.deps != 'windows'
+      - name: Archive binaries
         run: |
           TARGET="${{ matrix.target }}"
           mkdir -p dist
@@ -165,20 +132,8 @@ jobs:
           chmod +x dist/*
           tar -czvf "y2kexplorer-${TARGET}.tar.gz" -C dist .
 
-      - name: Archive binaries (Windows)
-        if: matrix.deps == 'windows'
-        shell: pwsh
-        run: |
-          $target = "${{ matrix.target }}"
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target\$target\release\y2k.exe" "dist\y2k-$target.exe"
-          Copy-Item "target\$target\release\y2k-probe.exe" "dist\y2k-probe-$target.exe"
-          Compress-Archive -Path dist\* -DestinationPath "y2kexplorer-$target.zip"
-
       - uses: actions/upload-artifact@v4
         with:
           name: y2kexplorer-${{ matrix.target }}
-          path: |
-            y2kexplorer-*.tar.gz
-            y2kexplorer-*.zip
+          path: y2kexplorer-*.tar.gz
           if-no-files-found: error

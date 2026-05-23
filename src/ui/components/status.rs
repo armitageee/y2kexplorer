@@ -12,14 +12,12 @@ pub fn draw_status(frame: &mut Frame, area: Rect, cluster: &str, message: &str, 
         Span::styled(" │ ", theme::FOOTER_HINT),
         Span::styled(message, theme::FOOTER),
     ]);
-    let widget = Paragraph::new(line)
-        .style(theme::FOOTER)
-        .block(
-            Block::default()
-                .borders(Borders::TOP)
-                .border_style(theme::FOOTER)
-                .title(" status ")
-                .title_style(theme::FOOTER_TITLE),
-        );
+    let widget = Paragraph::new(line).style(theme::FOOTER).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(theme::FOOTER)
+            .title(" status ")
+            .title_style(theme::FOOTER_TITLE),
+    );
     frame.render_widget(widget, area);
 }
