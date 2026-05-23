@@ -42,6 +42,12 @@ pub enum Modal {
         group: String,
         spec: String,
     },
+    /// Добавить/удалить лейбл у выбранных топиков.
+    TopicLabel {
+        label: String,
+        add: bool,
+        topic_count: usize,
+    },
 }
 
 impl Modal {
@@ -55,6 +61,13 @@ impl Modal {
             Modal::MessageLimit { .. } => "Message limit",
             Modal::DeleteGroupConfirm { .. } => "Delete consumer group",
             Modal::ResetOffsets { .. } => "Reset offsets",
+            Modal::TopicLabel { add, .. } => {
+                if *add {
+                    "Add label"
+                } else {
+                    "Remove label"
+                }
+            }
         }
     }
 
@@ -100,6 +113,7 @@ impl Modal {
             Modal::MessageLimit { value } => value.push(c),
             Modal::DeleteGroupConfirm { .. } => {}
             Modal::ResetOffsets { spec, .. } => spec.push(c),
+            Modal::TopicLabel { label, .. } => label.push(c),
         }
     }
 
@@ -139,6 +153,9 @@ impl Modal {
             Modal::ResetOffsets { spec, .. } => {
                 spec.pop();
             }
+            Modal::TopicLabel { label, .. } => {
+                label.pop();
+            }
         }
     }
 
@@ -158,41 +175,45 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
         Modal::CreateTopic { .. } => 9,
         Modal::ResetOffsets { .. } => 9,
         Modal::Filter | Modal::Command | Modal::MessageLimit { .. } => 5,
+        Modal::TopicLabel { .. } => 7,
     };
     let popup = centered_rect(popup_w, popup_h, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme::MODAL_BORDER)
+        .border_style(theme::modal_border())
         .title(format!(" {} ", modal.title()))
-        .title_style(theme::BLOCK_TITLE);
+        .title_style(theme::block_title());
 
     let lines = match modal {
         Modal::Filter => {
             let buf = extra_buf.unwrap_or("");
             vec![
-                Line::from(Span::styled("pattern: ", theme::MODAL_LABEL)),
+                Line::from(Span::styled("pattern: ", theme::modal_label())),
                 Line::from(vec![
-                    Span::styled(buf, theme::MODAL_INPUT),
-                    Span::styled("_", theme::MODAL_CURSOR),
+                    Span::styled(buf, theme::modal_input()),
+                    Span::styled("_", theme::modal_cursor()),
                 ]),
                 Line::from(""),
-                Line::from(Span::styled("Enter apply · Esc cancel", theme::FOOTER_HINT)),
+                Line::from(Span::styled(
+                    "Enter apply · Esc cancel",
+                    theme::footer_hint(),
+                )),
             ]
         }
         Modal::Command => {
             let buf = extra_buf.unwrap_or("");
             vec![
                 Line::from(vec![
-                    Span::styled(": ", theme::MODAL_LABEL),
-                    Span::styled(buf, theme::MODAL_INPUT),
-                    Span::styled("_", theme::MODAL_CURSOR),
+                    Span::styled(": ", theme::modal_label()),
+                    Span::styled(buf, theme::modal_input()),
+                    Span::styled("_", theme::modal_cursor()),
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
                     "context <name> · clusters · help  (Enter run, Esc cancel)",
-                    theme::FOOTER_HINT,
+                    theme::footer_hint(),
                 )),
             ]
         }
@@ -203,15 +224,15 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
             field,
         } => {
             let mut out = vec![Line::from(vec![
-                Span::styled("topic: ", theme::MODAL_LABEL),
-                Span::styled(topic.as_str(), theme::VALUE),
+                Span::styled("topic: ", theme::modal_label()),
+                Span::styled(topic.as_str(), theme::value()),
             ])];
             out.push(field_line("key", key, *field == ModalField::First));
             out.push(field_line("payload", payload, *field != ModalField::First));
             out.push(Line::from(""));
             out.push(Line::from(Span::styled(
                 "Tab next field · Enter send · Esc cancel",
-                theme::FOOTER_HINT,
+                theme::footer_hint(),
             )));
             out
         }
@@ -226,50 +247,75 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
                 Line::from(""),
                 Line::from(Span::styled(
                     "Tab next · Enter create · Esc cancel",
-                    theme::FOOTER_HINT,
+                    theme::footer_hint(),
                 )),
             ]
         }
         Modal::DeleteConfirm { topic } => vec![
             Line::from(Span::styled(
                 format!("Delete topic \"{topic}\"?"),
-                theme::ERROR,
+                theme::error(),
             )),
             Line::from(""),
-            Line::from(Span::styled("y confirm · n/Esc cancel", theme::FOOTER_HINT)),
+            Line::from(Span::styled(
+                "y confirm · n/Esc cancel",
+                theme::footer_hint(),
+            )),
         ],
         Modal::MessageLimit { value } => vec![
             field_line("limit", value, true),
             Line::from(""),
             Line::from(Span::styled(
                 "10–10000 · Enter apply · Esc cancel",
-                theme::FOOTER_HINT,
+                theme::footer_hint(),
             )),
         ],
         Modal::DeleteGroupConfirm { group } => vec![
             Line::from(Span::styled(
                 format!("Delete consumer group \"{group}\"?"),
-                theme::ERROR,
+                theme::error(),
             )),
             Line::from(""),
-            Line::from(Span::styled("y confirm · n/Esc cancel", theme::FOOTER_HINT)),
+            Line::from(Span::styled(
+                "y confirm · n/Esc cancel",
+                theme::footer_hint(),
+            )),
         ],
         Modal::ResetOffsets { group, spec } => vec![
             Line::from(vec![
-                Span::styled("group: ", theme::MODAL_LABEL),
-                Span::styled(group.as_str(), theme::VALUE),
+                Span::styled("group: ", theme::modal_label()),
+                Span::styled(group.as_str(), theme::value()),
             ]),
             field_line("spec", spec, true),
             Line::from(""),
             Line::from(Span::styled(
                 "earliest · latest · offset:N · timestamp:UNIX_MS",
-                theme::FOOTER_HINT,
+                theme::footer_hint(),
             )),
             Line::from(Span::styled(
                 "Enter apply · Esc cancel  (group must be Empty/Dead)",
-                theme::FOOTER_HINT,
+                theme::footer_hint(),
             )),
         ],
+        Modal::TopicLabel {
+            label,
+            add,
+            topic_count,
+        } => {
+            let action = if *add { "add to" } else { "remove from" };
+            vec![
+                Line::from(Span::styled(
+                    format!("{action} {topic_count} topic(s)"),
+                    theme::value(),
+                )),
+                field_line("label", label, true),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "lowercase, no spaces · Enter apply · Esc cancel",
+                    theme::footer_hint(),
+                )),
+            ]
+        }
     };
 
     let widget = Paragraph::new(lines)
@@ -280,17 +326,17 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
 }
 
 fn field_line(label: &str, value: &str, active: bool) -> Line<'static> {
-    let mut spans = vec![Span::styled(format!("{label}: "), theme::MODAL_LABEL)];
+    let mut spans = vec![Span::styled(format!("{label}: "), theme::modal_label())];
     if active {
-        spans.push(Span::styled(value.to_string(), theme::MODAL_INPUT));
-        spans.push(Span::styled("_", theme::MODAL_CURSOR));
+        spans.push(Span::styled(value.to_string(), theme::modal_input()));
+        spans.push(Span::styled("_", theme::modal_cursor()));
     } else {
         let text = if value.is_empty() {
             "(empty)".to_string()
         } else {
             value.to_string()
         };
-        spans.push(Span::styled(text, theme::VALUE));
+        spans.push(Span::styled(text, theme::value()));
     }
     Line::from(spans)
 }
@@ -318,4 +364,17 @@ pub fn layout_main(area: Rect, show_full_help: bool) -> [Rect; 3] {
     ])
     .split(area);
     [chunks[0], chunks[1], chunks[2]]
+}
+
+/// Sidebar (14 cols) + main/status/keys, когда на корневом экране навигации.
+pub fn layout_app(
+    area: Rect,
+    show_sidebar: bool,
+    show_full_help: bool,
+) -> (Option<Rect>, [Rect; 3]) {
+    if !show_sidebar {
+        return (None, layout_main(area, show_full_help));
+    }
+    let chunks = Layout::horizontal([Constraint::Length(14), Constraint::Min(10)]).split(area);
+    (Some(chunks[0]), layout_main(chunks[1], show_full_help))
 }

@@ -8,16 +8,16 @@ use crate::ui::theme;
 pub fn draw_status(frame: &mut Frame, area: Rect, cluster: &str, message: &str, loading: bool) {
     let indicator = if loading { "⏳ " } else { "● " };
     let line = Line::from(vec![
-        Span::styled(format!("{indicator}{cluster}"), theme::FOOTER_TITLE),
-        Span::styled(" │ ", theme::FOOTER_HINT),
-        Span::styled(message, theme::FOOTER),
+        Span::styled(format!("{indicator}{cluster}"), theme::footer_title()),
+        Span::styled(" │ ", theme::footer_hint()),
+        Span::styled(message, theme::footer()),
     ]);
-    let widget = Paragraph::new(line).style(theme::FOOTER).block(
+    let widget = Paragraph::new(line).style(theme::footer()).block(
         Block::default()
             .borders(Borders::TOP)
-            .border_style(theme::FOOTER)
+            .border_style(theme::footer())
             .title(" status ")
-            .title_style(theme::FOOTER_TITLE),
+            .title_style(theme::footer_title()),
     );
     frame.render_widget(widget, area);
 }

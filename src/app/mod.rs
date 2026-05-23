@@ -11,11 +11,14 @@ use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
-use crate::config::{clamp_live_poll_secs, AppConfig, ClusterConfig};
-use crate::kafka::{ClusterConnection, PartitionInfo, ResetStrategy};
-use crate::views::{GroupDetailsView, GroupsView, MessagesView, TopicsView, ViewStack};
+use crate::config::{clamp_live_poll_secs, clamp_watermark_parallelism, AppConfig, ClusterConfig};
+use crate::kafka::{ClusterConnection, ListTopicsOptions, PartitionInfo, ResetStrategy, TopicInfo};
+use crate::views::{
+    GroupDetailsView, GroupsView, LabelListView, MessagesView, Screen, TopicsView, ViewStack,
+};
 
-use modal::{draw_modal, layout_main, Modal, ModalField};
+use crate::ui::draw_sidebar;
+use modal::{draw_modal, layout_app, Modal, ModalField};
 use worker::{
     spawn_create_topic, spawn_delete_group, spawn_delete_topic, spawn_fetch_messages,
     spawn_group_offsets, spawn_list_groups, spawn_list_topics, spawn_poll_live_messages,
@@ -39,6 +42,10 @@ pub struct App {
     worker_tx: Sender<WorkerMsg>,
     last_live_poll: Option<Instant>,
     live_fetch_in_flight: bool,
+    /// Время старта приложения — пока `splash_until` не истёк, показываем splash-screen.
+    splash_until: Option<Instant>,
+    /// Кэш последнего списка топиков с брокера (для переключения sidebar без refetch).
+    cached_topics: Vec<TopicInfo>,
 }
 
 impl App {
@@ -68,11 +75,28 @@ impl App {
             worker_tx,
             last_live_poll: None,
             live_fetch_in_flight: false,
+            splash_until: Some(Instant::now() + crate::ui::SPLASH_DURATION),
+            cached_topics: Vec::new(),
         })
+    }
+
+    /// Активен ли splash-screen прямо сейчас.
+    fn splash_active(&self) -> bool {
+        self.splash_until
+            .map(|deadline| Instant::now() < deadline)
+            .unwrap_or(false)
+    }
+
+    /// Гасит splash немедленно (по клавише или по таймеру в render-tick).
+    fn dismiss_splash(&mut self) {
+        self.splash_until = None;
     }
 
     /// Периодический live-poll (вызывается из главного цикла, не блокирует UI).
     pub fn tick(&mut self) {
+        if self.splash_active() {
+            return;
+        }
         if self.modal.is_some()
             || self.show_partitions_popup
             || self.live_fetch_in_flight
@@ -118,7 +142,11 @@ impl App {
     }
 
     pub fn init_connection(&mut self) {
-        match ClusterConnection::connect(&self.cluster) {
+        let opts = ListTopicsOptions {
+            fetch_watermarks: self.config.defaults.fetch_watermarks,
+            parallelism: clamp_watermark_parallelism(self.config.defaults.watermark_parallelism),
+        };
+        match ClusterConnection::connect(&self.cluster).map(|c| c.with_list_topics_options(opts)) {
             Ok(conn) => {
                 self.connection = Some(conn);
                 self.status = "connected".into();
@@ -132,6 +160,17 @@ impl App {
     }
 
     pub fn handle_event(&mut self, ev: Event) -> io::Result<()> {
+        // Любая клавиша во время splash гасит его и НЕ пропускается дальше — иначе
+        // юзер случайно дёрнет, например, `q` и сразу выйдет, не увидев приложение.
+        if self.splash_active() {
+            if let Event::Key(key) = ev {
+                if key.kind == KeyEventKind::Press {
+                    self.dismiss_splash();
+                }
+            }
+            return Ok(());
+        }
+
         if let Some(modal) = self.modal.clone() {
             return self.handle_modal_event(ev, modal);
         }
@@ -215,6 +254,7 @@ impl App {
                 match self.current_mut() {
                     ViewStack::Topics(v) => v.table.filter = filter,
                     ViewStack::Groups(v) => v.table.filter = filter,
+                    ViewStack::Labels(v) => v.table.filter = filter,
                     _ => {}
                 }
                 self.close_modal();
@@ -286,6 +326,14 @@ impl App {
                 self.run_reset_offsets(group, strategy);
                 self.close_modal();
             }
+            Modal::TopicLabel {
+                label,
+                add,
+                topic_count: _,
+            } => {
+                self.apply_topic_label(label.trim(), add);
+                self.close_modal();
+            }
         }
     }
 
@@ -310,8 +358,60 @@ impl App {
                     self.filter_buf = v.table.filter.clone();
                     self.modal = Some(Modal::Filter);
                 }
+                ViewStack::Labels(v) => {
+                    self.filter_buf = v.table.filter.clone();
+                    self.modal = Some(Modal::Filter);
+                }
                 _ => {}
             },
+            KeyCode::Char('1') => self.switch_nav(Screen::Topics),
+            KeyCode::Char('2') => self.switch_nav(Screen::Groups),
+            KeyCode::Char('3') => self.switch_nav(Screen::Labels),
+            KeyCode::Char(' ') => {
+                if let ViewStack::Topics(v) = self.current_mut() {
+                    v.toggle_mark();
+                    let n = v.table.marked_count();
+                    self.status = if n > 0 {
+                        format!("{n} topic(s) marked (Space toggle, D clear)")
+                    } else {
+                        "mark cleared".into()
+                    };
+                }
+            }
+            KeyCode::Char('L') => {
+                if let ViewStack::Topics(v) = self.current() {
+                    let topics = v.target_topic_names();
+                    if topics.is_empty() {
+                        self.status = "select topic(s) first".into();
+                    } else {
+                        self.modal = Some(Modal::TopicLabel {
+                            label: String::new(),
+                            add: true,
+                            topic_count: topics.len(),
+                        });
+                    }
+                }
+            }
+            KeyCode::Char('U') => {
+                if let ViewStack::Topics(v) = self.current() {
+                    let topics = v.target_topic_names();
+                    if topics.is_empty() {
+                        self.status = "select topic(s) first".into();
+                    } else {
+                        self.modal = Some(Modal::TopicLabel {
+                            label: String::new(),
+                            add: false,
+                            topic_count: topics.len(),
+                        });
+                    }
+                }
+            }
+            KeyCode::Char('D') => {
+                if let ViewStack::Topics(v) = self.current_mut() {
+                    v.clear_marks();
+                    self.status = "marks cleared".into();
+                }
+            }
             KeyCode::Char(':') => {
                 self.command_buf.clear();
                 self.modal = Some(Modal::Command);
@@ -467,7 +567,7 @@ impl App {
         match self.current() {
             ViewStack::Topics(v) => v.selected_topic().map(str::to_string),
             ViewStack::Messages(v) => Some(v.topic.clone()),
-            ViewStack::Groups(_) | ViewStack::GroupDetails(_) => None,
+            ViewStack::Groups(_) | ViewStack::GroupDetails(_) | ViewStack::Labels(_) => None,
         }
     }
 
@@ -533,6 +633,7 @@ impl App {
             ViewStack::Messages(v) => v.show_help = !v.show_help,
             ViewStack::Groups(v) => v.show_help = !v.show_help,
             ViewStack::GroupDetails(v) => v.show_help = !v.show_help,
+            ViewStack::Labels(v) => v.show_help = !v.show_help,
         }
     }
 
@@ -542,6 +643,7 @@ impl App {
             ViewStack::Messages(v) => v.next(),
             ViewStack::Groups(v) => v.table.next(),
             ViewStack::GroupDetails(v) => v.table.next(),
+            ViewStack::Labels(v) => v.table.next(),
         }
     }
 
@@ -551,6 +653,7 @@ impl App {
             ViewStack::Messages(v) => v.prev(),
             ViewStack::Groups(v) => v.table.prev(),
             ViewStack::GroupDetails(v) => v.table.prev(),
+            ViewStack::Labels(v) => v.table.prev(),
         }
     }
 
@@ -584,6 +687,27 @@ impl App {
                     }
                     self.stack.push(ViewStack::GroupDetails(details));
                     self.reload_group_offsets(id);
+                }
+            }
+            ViewStack::Labels(v) => {
+                if let Some(label) = v.selected_label() {
+                    let label = label.to_string();
+                    let cluster = self.cluster_name.clone();
+                    let mut tv = TopicsView::new();
+                    tv.set_label_filter(Some(label.clone()));
+                    if !self.cached_topics.is_empty() {
+                        tv.load_with_labels(
+                            self.cached_topics.clone(),
+                            &self.config.topic_labels,
+                            &cluster,
+                        );
+                    }
+                    self.stack = vec![ViewStack::Topics(tv)];
+                    if self.cached_topics.is_empty() {
+                        self.refresh_topics();
+                    } else {
+                        self.status = format!("filter: label @{label}");
+                    }
                 }
             }
             _ => {}
@@ -654,6 +778,14 @@ impl App {
                 let group = v.group.clone();
                 self.reload_group_offsets(group);
             }
+            ViewStack::Labels(_) => {
+                let cluster = self.cluster_name.clone();
+                let store = self.config.topic_labels.clone();
+                if let ViewStack::Labels(v) = self.current_mut() {
+                    v.load(&store, &cluster);
+                }
+                self.status = "labels refreshed".into();
+            }
         }
     }
 
@@ -682,9 +814,83 @@ impl App {
     }
 
     fn open_groups(&mut self) {
-        if matches!(self.current(), ViewStack::Topics(_)) {
-            self.stack.push(ViewStack::Groups(GroupsView::new()));
-            self.refresh_groups();
+        self.switch_nav(Screen::Groups);
+    }
+
+    fn switch_nav(&mut self, screen: Screen) {
+        while self.stack.len() > 1 {
+            self.stack.pop();
+        }
+        let cluster = self.cluster_name.clone();
+        match screen {
+            Screen::Topics => {
+                let mut v = TopicsView::new();
+                if !self.cached_topics.is_empty() {
+                    v.load_with_labels(
+                        self.cached_topics.clone(),
+                        &self.config.topic_labels,
+                        &cluster,
+                    );
+                }
+                self.stack = vec![ViewStack::Topics(v)];
+                if self.cached_topics.is_empty() {
+                    self.refresh_topics();
+                } else {
+                    self.status = "topics".into();
+                }
+            }
+            Screen::Groups => {
+                self.stack = vec![ViewStack::Groups(GroupsView::new())];
+                self.refresh_groups();
+            }
+            Screen::Labels => {
+                let mut v = LabelListView::new();
+                v.load(&self.config.topic_labels, &cluster);
+                self.stack = vec![ViewStack::Labels(v)];
+                self.status = "labels".into();
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_topic_label(&mut self, label: &str, add: bool) {
+        if label.is_empty() {
+            self.status = "label cannot be empty".into();
+            return;
+        }
+        let topics = match self.current() {
+            ViewStack::Topics(v) => v.target_topic_names(),
+            _ => Vec::new(),
+        };
+        if topics.is_empty() {
+            self.status = "no topics selected".into();
+            return;
+        }
+        let cluster = self.cluster_name.clone();
+        if add {
+            self.config
+                .topic_labels
+                .add_label_to_many(&cluster, &topics, label);
+        } else {
+            self.config
+                .topic_labels
+                .remove_label_from_many(&cluster, &topics, label);
+        }
+        let action = if add { "added" } else { "removed" };
+        match self.config.save() {
+            Ok(()) => {
+                self.status = format!(
+                    "{action} label '{label}' on {} topic(s) (saved)",
+                    topics.len()
+                );
+            }
+            Err(e) => {
+                self.status = format!("{action} label '{label}' ({e:#}, not saved)");
+            }
+        }
+        let store = self.config.topic_labels.clone();
+        if let ViewStack::Topics(v) = self.current_mut() {
+            v.refresh_labels(&store, &cluster);
         }
     }
 
@@ -798,8 +1004,11 @@ impl App {
         self.loading = false;
         match msg {
             WorkerMsg::Topics(Ok(topics)) => {
+                self.cached_topics = topics.clone();
+                let cluster = self.cluster_name.clone();
+                let store = self.config.topic_labels.clone();
                 if let ViewStack::Topics(v) = self.current_mut() {
-                    v.load(topics);
+                    v.load_with_labels(topics, &store, &cluster);
                 }
                 self.status = "ready".into();
             }
@@ -898,6 +1107,15 @@ impl App {
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
+        if self.splash_active() {
+            crate::ui::draw_splash(frame, area);
+            return;
+        }
+        // splash истёк по таймеру → скидываем флаг, чтобы не звать draw_splash снова.
+        if self.splash_until.is_some() {
+            self.dismiss_splash();
+        }
+
         if self.show_partitions_popup && self.modal.is_none() {
             self.render_partitions_popup(frame, area);
             return;
@@ -912,8 +1130,15 @@ impl App {
             ViewStack::Messages(v) => v.show_help,
             ViewStack::Groups(v) => v.show_help,
             ViewStack::GroupDetails(v) => v.show_help,
+            ViewStack::Labels(v) => v.show_help,
         };
-        let chunks = layout_main(area, show_help);
+        let show_sidebar = self.stack.len() == 1 && self.current().is_root_nav();
+        let root_screen = self.current().root_screen();
+        let (sidebar_area, chunks) = layout_app(area, show_sidebar, show_help);
+
+        if let Some(sb) = sidebar_area {
+            draw_sidebar(frame, sb, root_screen);
+        }
 
         match self.current_mut() {
             ViewStack::Topics(v) => v.render(
@@ -926,6 +1151,9 @@ impl App {
                 frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
             ),
             ViewStack::GroupDetails(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::Labels(v) => v.render(
                 frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
             ),
         }
@@ -952,9 +1180,9 @@ impl App {
             Paragraph::new(text).block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(theme::MODAL_BORDER)
+                    .border_style(theme::modal_border())
                     .title(" partitions (Esc) ")
-                    .title_style(theme::BLOCK_TITLE),
+                    .title_style(theme::block_title()),
             ),
             popup[0],
         );

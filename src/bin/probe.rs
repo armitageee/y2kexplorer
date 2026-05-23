@@ -4,13 +4,17 @@
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use rdkafka::admin::AdminClient;
 use rdkafka::client::DefaultClientContext;
 use rdkafka::config::ClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::util::Timeout;
 
 use y2kexplorer::config::{
@@ -25,6 +29,12 @@ struct Cli {
     config: Option<PathBuf>,
     #[arg(short, long, default_value = "secure")]
     cluster: String,
+    /// Run the topic-listing benchmark: measure metadata + watermarks (sequential vs parallel).
+    #[arg(long)]
+    bench_topics: bool,
+    /// Parallelism level for the parallel watermarks bench (default 16).
+    #[arg(long, default_value_t = 16)]
+    bench_parallel: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -104,6 +114,141 @@ fn main() -> Result<()> {
         )?;
     }
 
+    if cli.bench_topics {
+        println!("\n=== bench: list_topics ===");
+        bench_list_topics(cluster, cli.bench_parallel)?;
+    }
+
+    Ok(())
+}
+
+/// Воспроизводит логику `ClusterConnection::list_topics`, но с замерами фаз
+/// и сравнением sequential vs parallel watermarks fetch.
+fn bench_list_topics(cluster: &ClusterConfig, parallel: usize) -> Result<()> {
+    apply_kerberos_env(&cluster.auth);
+    let parallel = parallel.max(1);
+
+    // 1. metadata
+    let cfg = build_config(
+        cluster,
+        TlsMode {
+            verify_hostname: true,
+            ca: None,
+        },
+        None,
+    );
+    let admin: AdminClient<DefaultClientContext> = cfg.create().context("admin client")?;
+    let t0 = Instant::now();
+    let metadata = admin
+        .inner()
+        .fetch_metadata(None, Timeout::After(Duration::from_secs(30)))
+        .context("fetch metadata")?;
+    let meta_ms = t0.elapsed().as_millis();
+
+    let topics: Vec<(String, Vec<i32>)> = metadata
+        .topics()
+        .iter()
+        .filter(|t| !t.name().is_empty())
+        .map(|t| {
+            (
+                t.name().to_string(),
+                t.partitions().iter().map(|p| p.id()).collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+
+    let topics_n = topics.len();
+    let parts_n: usize = topics.iter().map(|(_, p)| p.len()).sum();
+    println!("metadata: {meta_ms} ms — {topics_n} topics / {parts_n} partitions");
+
+    // 2. consumer for watermarks
+    let mut consumer_cfg = build_config(
+        cluster,
+        TlsMode {
+            verify_hostname: true,
+            ca: None,
+        },
+        None,
+    );
+    consumer_cfg.set("group.id", format!("y2k-probe-{}", std::process::id()));
+    let consumer: BaseConsumer = consumer_cfg.create().context("consumer")?;
+    let timeout = Timeout::After(Duration::from_secs(5));
+
+    // 3. SEQUENTIAL bench
+    let t0 = Instant::now();
+    let mut total_seq: u64 = 0;
+    for (name, parts) in &topics {
+        for &pid in parts {
+            if let Ok((low, high)) = consumer.fetch_watermarks(name, pid, timeout) {
+                total_seq += (high - low).max(0) as u64;
+            }
+        }
+    }
+    let seq_ms = t0.elapsed().as_millis();
+    let per_call_seq = if parts_n > 0 {
+        seq_ms as f64 / parts_n as f64
+    } else {
+        0.0
+    };
+    println!(
+        "sequential watermarks: {seq_ms} ms total ({per_call_seq:.1} ms/partition) — sum={total_seq}"
+    );
+
+    // 4. PARALLEL bench (PAR threads share an Arc<BaseConsumer>).
+    let consumer = Arc::new(consumer);
+    let topic_counts: Vec<AtomicU64> = (0..topics.len()).map(|_| AtomicU64::new(0)).collect();
+    let topic_counts = Arc::new(topic_counts);
+
+    // Flat job list
+    let jobs: Vec<(usize, String, i32)> = topics
+        .iter()
+        .enumerate()
+        .flat_map(|(i, (n, parts))| parts.iter().map(move |&p| (i, n.clone(), p)))
+        .collect();
+
+    let t0 = Instant::now();
+    let chunk_size = jobs.len().div_ceil(parallel);
+    let mut handles = Vec::with_capacity(parallel);
+    for chunk in jobs.chunks(chunk_size) {
+        let chunk: Vec<_> = chunk.to_vec();
+        let consumer = consumer.clone();
+        let counts = topic_counts.clone();
+        handles.push(thread::spawn(move || {
+            for (idx, name, pid) in chunk {
+                if let Ok((low, high)) = consumer.fetch_watermarks(&name, pid, timeout) {
+                    let v = (high - low).max(0) as u64;
+                    counts[idx].fetch_add(v, Ordering::Relaxed);
+                }
+            }
+        }));
+    }
+    for h in handles {
+        let _ = h.join();
+    }
+    let par_ms = t0.elapsed().as_millis();
+    let total_par: u64 = topic_counts.iter().map(|c| c.load(Ordering::Relaxed)).sum();
+    let per_call_par = if parts_n > 0 {
+        par_ms as f64 / parts_n as f64
+    } else {
+        0.0
+    };
+    println!(
+        "parallel({parallel}) watermarks: {par_ms} ms total ({per_call_par:.1} ms/partition) — sum={total_par}"
+    );
+
+    // 5. summary
+    if par_ms > 0 {
+        let speedup = seq_ms as f64 / par_ms as f64;
+        println!(
+            "speedup: {speedup:.1}× (sequential {seq_ms} ms → parallel({parallel}) {par_ms} ms)"
+        );
+    }
+    if total_seq != total_par {
+        println!(
+            "WARN: counts differ between seq and par — seq={total_seq} par={total_par} (some \
+             watermark calls timed out under one mode)"
+        );
+    }
     Ok(())
 }
 

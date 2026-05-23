@@ -6,12 +6,17 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::labels::TopicLabelStore;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub defaults: Defaults,
     #[serde(default)]
     pub clusters: HashMap<String, ClusterConfig>,
+    /// Лейблы топиков по кластерам (локально, не в Kafka).
+    #[serde(default)]
+    pub topic_labels: TopicLabelStore,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -22,6 +27,33 @@ pub struct Defaults {
     /// Интервал live-poll (секунды), 1–30.
     #[serde(default = "default_live_poll_secs")]
     pub live_poll_secs: u64,
+    /// UI-тема: `"dark"` (по умолчанию) или `"light"`. Можно переопределить флагом `--theme`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    /// Брать ли счётчик сообщений (high-low watermark) для каждого топика на главной странице.
+    /// `false` — почти мгновенная загрузка списка топиков, message_count=0.
+    /// Полезно на кластерах с >1000 партиций или высокой broker latency.
+    #[serde(default = "default_fetch_watermarks")]
+    pub fetch_watermarks: bool,
+    /// Сколько потоков параллельно опрашивает watermarks (1..=64).
+    /// Дефолт 16 — баланс между скоростью и нагрузкой на брокер.
+    #[serde(default = "default_watermark_parallelism")]
+    pub watermark_parallelism: usize,
+}
+
+fn default_fetch_watermarks() -> bool {
+    true
+}
+
+fn default_watermark_parallelism() -> usize {
+    16
+}
+
+pub const WATERMARK_PARALLELISM_MIN: usize = 1;
+pub const WATERMARK_PARALLELISM_MAX: usize = 64;
+
+pub fn clamp_watermark_parallelism(par: usize) -> usize {
+    par.clamp(WATERMARK_PARALLELISM_MIN, WATERMARK_PARALLELISM_MAX)
 }
 
 fn default_message_limit() -> usize {
@@ -285,8 +317,12 @@ impl AppConfig {
                 cluster: Some("local".into()),
                 message_limit: default_message_limit(),
                 live_poll_secs: default_live_poll_secs(),
+                theme: None,
+                fetch_watermarks: default_fetch_watermarks(),
+                watermark_parallelism: default_watermark_parallelism(),
             },
             clusters,
+            topic_labels: TopicLabelStore::default(),
         }
     }
 }
