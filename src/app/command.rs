@@ -58,6 +58,7 @@ impl App {
             }
             "groups" | "g" => self.open_groups(),
             "labels" => self.switch_nav(crate::views::Screen::Labels),
+            "contexts" => self.switch_nav(crate::views::Screen::Contexts),
             "label" => {
                 if let Some(name) = parts.next() {
                     let label = name.to_string();
@@ -86,7 +87,7 @@ impl App {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "?".into());
                 self.status = format!(
-                    "config: {cfg}  |  :context  :clusters  :groups  :labels  :label <name>  :limit  :poll  :help"
+                    "config: {cfg}  |  :context <n>  :contexts  :clusters  :groups  :labels  :label  :limit  :poll  :help"
                 );
             }
             _ => {

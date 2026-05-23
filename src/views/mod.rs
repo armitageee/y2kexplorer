@@ -1,10 +1,12 @@
 mod group_details;
 mod groups;
+mod context_list;
 mod label_list;
 mod messages;
 mod stack;
 mod topics;
 
+pub use context_list::ContextListView;
 pub use group_details::GroupDetailsView;
 pub use groups::GroupsView;
 pub use label_list::LabelListView;

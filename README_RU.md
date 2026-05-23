@@ -180,7 +180,7 @@ watermark_parallelism = 16     # дефолт 16
 | `Esc` | назад / закрыть модалку |
 | `r` | обновить текущий вид |
 | `:` | команды (`context`, `clusters`, `groups`, `labels`, `label`, `limit`, `poll`, `help`) |
-| `1` / `2` / `3` | sidebar: Topics / Groups / Labels |
+| `1` / `2` / `3` / `4` | sidebar: Topics / Groups / Labels / Contexts |
 | `?` | справка |
 | `q` | выход |
 
@@ -216,6 +216,18 @@ watermark_parallelism = 16     # дефолт 16
 ```
 
 Команды: `:labels`, `:label billing`.
+
+### Contexts
+
+Список кластеров из `config.toml` и переключение между ними.
+
+| Клавиша | Действие |
+|---|---|
+| `Enter` | переключиться на кластер (переподключение + Topics) |
+| `/` | фильтр списка |
+| `4` | экран Contexts (sidebar) |
+
+Команды: `:contexts`, `:context <имя>`.
 
 ### Messages
 

@@ -1,4 +1,6 @@
-use super::{GroupDetailsView, GroupsView, LabelListView, MessagesView, TopicsView};
+use super::{
+    ContextListView, GroupDetailsView, GroupsView, LabelListView, MessagesView, TopicsView,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -7,6 +9,7 @@ pub enum Screen {
     Groups,
     GroupDetails,
     Labels,
+    Contexts,
 }
 
 pub enum ViewStack {
@@ -15,6 +18,7 @@ pub enum ViewStack {
     Groups(GroupsView),
     GroupDetails(GroupDetailsView),
     Labels(LabelListView),
+    Contexts(ContextListView),
 }
 
 impl ViewStack {
@@ -25,6 +29,7 @@ impl ViewStack {
             ViewStack::Groups(_) => Screen::Groups,
             ViewStack::GroupDetails(_) => Screen::GroupDetails,
             ViewStack::Labels(_) => Screen::Labels,
+            ViewStack::Contexts(_) => Screen::Contexts,
         }
     }
 
@@ -40,7 +45,10 @@ impl ViewStack {
     pub fn is_root_nav(&self) -> bool {
         matches!(
             self,
-            ViewStack::Topics(_) | ViewStack::Groups(_) | ViewStack::Labels(_)
+            ViewStack::Topics(_)
+                | ViewStack::Groups(_)
+                | ViewStack::Labels(_)
+                | ViewStack::Contexts(_)
         )
     }
 
@@ -51,6 +59,7 @@ impl ViewStack {
             ViewStack::Groups(v) => &v.table.title,
             ViewStack::GroupDetails(v) => &v.table.title,
             ViewStack::Labels(v) => &v.table.title,
+            ViewStack::Contexts(v) => &v.table.title,
         }
     }
 }

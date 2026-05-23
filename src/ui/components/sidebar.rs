@@ -6,10 +6,11 @@ use ratatui::Frame;
 use crate::ui::theme;
 use crate::views::Screen;
 
-const ITEMS: [(Screen, &str); 3] = [
+const ITEMS: [(Screen, &str); 4] = [
     (Screen::Topics, "Topics"),
     (Screen::Groups, "Groups"),
     (Screen::Labels, "Labels"),
+    (Screen::Contexts, "Contexts"),
 ];
 
 pub fn draw_sidebar(frame: &mut Frame, area: Rect, active: Screen) {

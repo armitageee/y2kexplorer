@@ -11,7 +11,7 @@ const HELP: &[&str] = &[
     "filter topics",
     "/",
     "filter",
-    "1/2/3",
+    "1-4",
     "nav pane",
     "?",
     "help",

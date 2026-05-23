@@ -181,7 +181,7 @@ See [`config.example.toml`](config.example.toml) for full examples.
 | `Esc` | back / close modal |
 | `r` | refresh current view |
 | `:` | command palette (`context`, `clusters`, `groups`, `labels`, `label`, `limit`, `poll`, `help`) |
-| `1` / `2` / `3` | sidebar: Topics / Groups / Labels |
+| `1` / `2` / `3` / `4` | sidebar: Topics / Groups / Labels / Contexts |
 | `?` | toggle help |
 | `q` | quit |
 
@@ -219,6 +219,18 @@ Config example:
 ```
 
 Commands: `:labels` (label browser), `:label billing` (filter topics).
+
+### Contexts
+
+Browse and switch Kafka clusters defined in `config.toml`.
+
+| Key | Action |
+|---|---|
+| `Enter` | switch to selected cluster (reconnect + Topics) |
+| `/` | filter context list |
+| `4` | open Contexts from anywhere (sidebar) |
+
+Commands: `:contexts`, `:context <name>` (quick switch without the menu).
 
 ### Messages
 
