@@ -132,7 +132,7 @@ jobs:
           chmod +x dist/*
           tar -czvf "y2kexplorer-${TARGET}.tar.gz" -C dist .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: y2kexplorer-${{ matrix.target }}
           path: y2kexplorer-*.tar.gz
