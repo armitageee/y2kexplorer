@@ -18,6 +18,8 @@ A keyboard-driven dashboard for Apache Kafka — in spirit close to
 [ratatui](https://docs.rs/ratatui), with a Y2K/PS2-flavored skin: deep blues,
 chrome cyan, magenta accents, double-line borders.
 
+[![asciicast](https://asciinema.org/a/mtFnSVROdvCeQkC7.svg)](https://asciinema.org/a/mtFnSVROdvCeQkC7)
+
 ## Features
 
 - **Topics** — list with filter (`/`), partition / replication / message-count columns

@@ -1,2 +1,3 @@
 /target
-# Cargo.lock закоммичен: это бинарное приложение, lock нужен для воспроизводимых билдов в CI.
+y2kexplorer.code-workspace
+
