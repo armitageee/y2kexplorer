@@ -28,6 +28,8 @@
 - **Consumer groups** — список, состояние, members, lag по партициям (`g` / `:groups`)
 - **Reset offsets** — `earliest` / `latest` / `offset:N` / `timestamp:UNIX_MS` (`R`)
 - **Удаление пустых групп** (`d` на Groups)
+- **Schema Registry** — список subjects, версии, просмотр Avro/JSON-схем (`6` / `:schemas`)
+- **Kafka Connect** — коннекторы, статус/tasks, конфиг; pause / resume / restart / delete (`7` / `:connect`)
 - **Мульти-кластерный конфиг** — переключение в TUI (`:context <name>`)
 - **Аутентификация** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) через keytab**
 
@@ -181,8 +183,8 @@ watermark_parallelism = 16     # дефолт 16
 | `Enter` | открыть выбранное |
 | `Esc` | назад / закрыть модалку |
 | `r` | обновить текущий вид |
-| `:` | команды (`context`, `clusters`, `groups`, `labels`, `label`, `limit`, `poll`, `help`) |
-| `1` / `2` / `3` / `4` | sidebar: Topics / Groups / Labels / Contexts |
+| `:` | команды (`context`, `clusters`, `groups`, `labels`, `acls`, `schemas`, `connect`, `label`, `limit`, `poll`, `help`) |
+| `1` / `2` / `3` / `4` / `5` / `6` / `7` | sidebar: Topics / Groups / Labels / Contexts / ACLs / Schemas / Connect |
 | `?` | справка |
 | `q` | выход |
 
@@ -211,7 +213,7 @@ watermark_parallelism = 16     # дефолт 16
 | `Enter` | Topics с фильтром по лейблу |
 | `d` | удалить лейбл со всех топиков кластера (подтверждение `y`) |
 | `/` | фильтр списка лейблов |
-| `1` / `2` / `3` / `4` | навигация в sidebar |
+| `1` / `2` / `3` / `4` / `5` / `6` | навигация в sidebar |
 
 ```toml
 [topic_labels.lt01]
@@ -231,6 +233,55 @@ watermark_parallelism = 16     # дефолт 16
 | `4` | экран Contexts (sidebar) |
 
 Команды: `:contexts`, `:context <имя>`.
+
+### ACLs
+
+Просмотр и управление ACL Kafka (нужен включённый authorizer и права администратора у вашего principal).
+
+| Клавиша | Действие |
+|---|---|
+| `/` | фильтр списка |
+| `c` | создать ACL |
+| `e` | изменить выбранный ACL (удаление старой записи + создание новой) |
+| `d` | удалить (подтверждение `y`) |
+| `r` | обновить |
+| `5` | экран ACLs (sidebar) |
+
+Команда: `:acls`
+
+Типы ресурсов: `topic`, `group`, `broker`, `cluster` (имя `kafka-cluster`), `transactional_id`. Pattern: `literal`, `prefixed`, `match`. Permission: `allow` / `deny`.
+
+### Schemas (Schema Registry)
+
+Отдельный HTTP-сервис Confluent Schema Registry — не через Kafka API. Для кластера нужна секция `[clusters.<name>.schema_registry]` с `url` (см. [`config.example.toml`](config.example.toml)).
+
+| Клавиша | Действие |
+|---|---|
+| `/` | фильтр по subject |
+| `Enter` | детали схемы (последняя версия) |
+| `j` / `k` | переключение версии в деталях |
+| `u` / `d` | прокрутка JSON схемы |
+| `r` | обновить |
+| `6` | экран Schemas (sidebar) |
+
+Команды: `:schemas`, `:schema <subject>`, `:sr <subject>`
+
+### Connect (Kafka Connect)
+
+Отдельный REST API Kafka Connect. Для кластера — секция `[clusters.<name>.kafka_connect]` с `url` (см. [`config.example.toml`](config.example.toml)).
+
+| Клавиша | Действие |
+|---|---|
+| `/` | фильтр коннекторов |
+| `Enter` | детали (статус, tasks, JSON конфига) |
+| `P` / `O` | pause / resume |
+| `R` | restart |
+| `d` | удалить (подтверждение `y`) |
+| `u` / `PageUp` / `PageDown` | прокрутка конфига |
+| `r` | обновить |
+| `7` | экран Connect (sidebar) |
+
+Команды: `:connect`, `:connectors`
 
 ### Messages
 
@@ -274,15 +325,35 @@ watermark_parallelism = 16     # дефолт 16
 
 ## Локальный запуск через Docker
 
-В репо лежит docker-compose с локальным Kafka (PLAINTEXT, без auth) и сидингом тестовых топиков:
+KRaft-кластер с **SASL/PLAIN**, **ACL** (StandardAuthorizer), **Schema Registry** и демо-пайплайном **Kafka Connect**:
+
+| Пользователь | Пароль | Роль |
+|---|---|---|
+| `admin` | `admin-secret` | super user — ACL, все топики |
+| `app` | `app-secret` | ограниченный — sample ACL: Read+Describe на `orders` |
 
 ```bash
 just up                    # или: docker compose up -d
-just dev                   # или: cargo run --release
+just dev                   # или: cargo run --release -- --cluster local
 just down                  # снести
 ```
 
-Kafka UI доступен на <http://localhost:8080> для cross-check.
+Скопируйте `config.example.toml` → `~/.config/y2kexplorer/config.toml` (включая `[clusters.local.schema_registry]` и `[clusters.local.kafka_connect]`). После `docker compose up -d`:
+
+- `schema-init` — Avro-схемы для `orders`, `users.events`, `payments.retry` (`*-value`);
+- `events-generator` — JSON в `docker/connect-data/events.json` каждые ~2 с;
+- `connect-init` — **file-source** (`events.json` → топик `connect.events`) и **file-sink** (`connect.events` → `docker/connect-data/sink.json`).
+
+| Сервис | URL |
+|---|---|
+| Kafka (SASL/PLAIN) | `localhost:9092` |
+| Schema Registry | <http://localhost:8081> |
+| Kafka Connect REST | <http://localhost:8083> |
+| Kafka UI | <http://localhost:8080> (admin) |
+
+Проверка SR: `curl -s http://localhost:8081/subjects`. В TUI: `6` или `:schemas`.
+
+Проверка Connect: `curl -s http://localhost:8083/connectors`. В TUI: `7` или `:connect`. Пайплайн: `tail -f docker/connect-data/sink.json`.
 
 ## Разработка
 

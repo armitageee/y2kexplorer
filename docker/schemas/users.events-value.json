@@ -1,0 +1,3 @@
+{
+  "schema": "{\"type\":\"record\",\"name\":\"UserEvent\",\"namespace\":\"com.example.users\",\"fields\":[{\"name\":\"userId\",\"type\":\"string\"},{\"name\":\"event\",\"type\":\"string\"},{\"name\":\"ts\",\"type\":\"long\"}]}"
+}

@@ -29,6 +29,8 @@ chrome cyan, magenta accents, double-line borders.
 - **Consumer groups** — list, state, members, lag per partition (`g` / `:groups`)
 - **Reset offsets** — `earliest` / `latest` / `offset:N` / `timestamp:UNIX_MS` (`R`)
 - **Delete empty groups** (`d` on Groups)
+- **Schema Registry** — browse subjects, versions, and Avro/JSON schema bodies (`6` / `:schemas`)
+- **Kafka Connect** — list connectors, status/tasks, config; pause / resume / restart / delete (`7` / `:connect`)
 - **Multi-cluster config** — switch contexts in-app (`:context <name>`)
 - **Authentication** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) via keytab**
 
@@ -182,8 +184,8 @@ See [`config.example.toml`](config.example.toml) for full examples.
 | `Enter` | open selection |
 | `Esc` | back / close modal |
 | `r` | refresh current view |
-| `:` | command palette (`context`, `clusters`, `groups`, `labels`, `label`, `limit`, `poll`, `help`) |
-| `1` / `2` / `3` / `4` | sidebar: Topics / Groups / Labels / Contexts |
+| `:` | command palette (`context`, `clusters`, `groups`, `labels`, `acls`, `schemas`, `connect`, `label`, `limit`, `poll`, `help`) |
+| `1` / `2` / `3` / `4` / `5` / `6` / `7` | sidebar: Topics / Groups / Labels / Contexts / ACLs / Schemas / Connect |
 | `?` | toggle help |
 | `q` | quit |
 
@@ -212,7 +214,7 @@ Local tags per topic (stored in `config.toml`, not on the broker). Use them to g
 | `Enter` | open Topics filtered by this label |
 | `d` | delete label from all topics in cluster (confirm `y`) |
 | `/` | filter label list |
-| `1` / `2` / `3` / `4` | sidebar navigation |
+| `1` / `2` / `3` / `4` / `5` / `6` | sidebar navigation |
 
 Config example:
 
@@ -234,6 +236,55 @@ Browse and switch Kafka clusters defined in `config.toml`.
 | `4` | open Contexts from anywhere (sidebar) |
 
 Commands: `:contexts`, `:context <name>` (quick switch without the menu).
+
+### ACLs
+
+List and manage Kafka ACLs (requires a cluster with the standard authorizer enabled and admin rights on your principal).
+
+| Key | Action |
+|---|---|
+| `/` | filter ACL list |
+| `c` | create ACL (form: resource type/name, pattern, principal, host, operation, permission) |
+| `e` | edit selected ACL (delete old binding + create new — Kafka has no in-place update) |
+| `d` | delete selected ACL (confirm `y`) |
+| `r` | refresh |
+| `5` | open ACLs from anywhere (sidebar) |
+
+Commands: `:acls`
+
+Resource types in the form: `topic`, `group`, `broker`, `cluster` (cluster ACL uses resource name `kafka-cluster`), `transactional_id`. Pattern: `literal`, `prefixed`, `match`. Permission: `allow` / `deny`.
+
+### Schemas (Schema Registry)
+
+Confluent Schema Registry is a separate HTTP service (not the Kafka protocol). Per cluster, add `[clusters.<name>.schema_registry]` with `url` — see [`config.example.toml`](config.example.toml).
+
+| Key | Action |
+|---|---|
+| `/` | filter subjects |
+| `Enter` | open schema detail (latest version) |
+| `j` / `k` | cycle versions in detail view |
+| `u` / `d` | scroll schema JSON |
+| `r` | refresh |
+| `6` | Schemas screen (sidebar) |
+
+Commands: `:schemas`, `:schema <subject>`, `:sr <subject>`
+
+### Connect (Kafka Connect)
+
+Kafka Connect is a separate REST API (`GET /connectors`, etc.). Per cluster, add `[clusters.<name>.kafka_connect]` with `url` — see [`config.example.toml`](config.example.toml).
+
+| Key | Action |
+|---|---|
+| `/` | filter connectors |
+| `Enter` | open connector detail (status, tasks, config JSON) |
+| `P` / `O` | pause / resume connector |
+| `R` | restart connector |
+| `d` | delete connector (confirm `y`) |
+| `u` / `PageUp` / `PageDown` | scroll config in detail view |
+| `r` | refresh |
+| `7` | Connect screen (sidebar) |
+
+Commands: `:connect`, `:connectors`
 
 ### Messages
 
@@ -277,15 +328,37 @@ Commands: `:contexts`, `:context <name>` (quick switch without the menu).
 
 ## Try it locally with Docker
 
-A minimal Kafka cluster (PLAINTEXT, no auth, seeded with sample topics) is included:
+A minimal KRaft Kafka cluster with **SASL/PLAIN**, **ACL** (StandardAuthorizer), **Schema Registry**, and a **Kafka Connect** demo pipeline is included:
+
+| User | Password | Role |
+|---|---|---|
+| `admin` | `admin-secret` | super user — ACL admin, all topics |
+| `app` | `app-secret` | limited — sample ACL: Read+Describe on `orders` |
 
 ```bash
 just up                    # or: docker compose up -d
-just dev                   # or: cargo run --release
+just dev                   # or: cargo run --release -- --cluster local
 just down                  # tear down
 ```
 
-Kafka UI is exposed at <http://localhost:8080> for cross-checking.
+Copy `config.example.toml` → `~/.config/y2kexplorer/config.toml` (include `[clusters.local.schema_registry]` and `[clusters.local.kafka_connect]`). After `docker compose up -d`:
+
+- `schema-init` registers Avro schemas for `orders`, `users.events`, and `payments.retry` (`*-value` subjects).
+- `events-generator` appends JSON lines to `docker/connect-data/events.json` every ~2s.
+- `connect-init` registers two connectors:
+  - **file-source** — reads `/data/events.json` → topic **`connect.events`**
+  - **file-sink** — consumes **`connect.events`** → `/data/sink.json` (on the host: `docker/connect-data/sink.json`)
+
+| Service | URL |
+|---|---|
+| Kafka (SASL/PLAIN) | `localhost:9092` |
+| Schema Registry | <http://localhost:8081> |
+| Kafka Connect REST | <http://localhost:8083> |
+| Kafka UI | <http://localhost:8080> (admin) |
+
+Smoke-test SR: `curl -s http://localhost:8081/subjects`. In the TUI: `6` or `:schemas`.
+
+Smoke-test Connect: `curl -s http://localhost:8083/connectors`. In the TUI: `7` or `:connect`. Watch the pipeline: `tail -f docker/connect-data/sink.json`.
 
 ## Development
 

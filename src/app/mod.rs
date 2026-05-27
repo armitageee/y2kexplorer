@@ -12,18 +12,25 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
 use crate::config::{clamp_live_poll_secs, clamp_watermark_parallelism, AppConfig, ClusterConfig};
-use crate::kafka::{ClusterConnection, ListTopicsOptions, PartitionInfo, ResetStrategy, TopicInfo};
+use crate::kafka::{
+    AclEntry, AclSpec, ClusterConnection, ListTopicsOptions, PartitionInfo, ResetStrategy,
+    TopicInfo,
+};
+use crate::config::{KafkaConnectConfig, SchemaRegistryConfig};
 use crate::views::{
-    ContextListView, GroupDetailsView, GroupsView, LabelListView, MessagesView, Screen, TopicsView,
-    ViewStack,
+    AclsView, ConnectorDetailView, ConnectorsView, ContextListView, GroupDetailsView, GroupsView,
+    LabelListView, MessagesView, SchemaDetailView, SchemasView, Screen, TopicsView, ViewStack,
 };
 
 use crate::ui::draw_sidebar;
-use modal::{draw_modal, layout_app, Modal, ModalField};
+use modal::{draw_modal, layout_app, AclFormField, Modal, ModalField};
 use worker::{
-    spawn_create_topic, spawn_delete_group, spawn_delete_topic, spawn_fetch_messages,
-    spawn_group_offsets, spawn_list_groups, spawn_list_topics, spawn_poll_live_messages,
-    spawn_produce, spawn_reset_group_offsets, WorkerMsg,
+    spawn_connect_delete, spawn_connect_pause, spawn_connect_restart, spawn_connect_resume,
+    spawn_connector_detail, spawn_create_acl, spawn_create_topic, spawn_delete_acl,
+    spawn_delete_group, spawn_delete_topic, spawn_fetch_messages, spawn_group_offsets,
+    spawn_list_acls, spawn_list_connectors, spawn_list_groups, spawn_list_schemas, spawn_list_topics,
+    spawn_poll_live_messages, spawn_produce, spawn_replace_acl, spawn_reset_group_offsets,
+    spawn_schema_version, spawn_schema_versions, WorkerMsg,
 };
 
 pub struct App {
@@ -238,6 +245,24 @@ impl App {
                             self.close_modal();
                         }
                     }
+                    Modal::DeleteAclConfirm { spec, .. } => {
+                        if modal.is_yes(c) {
+                            let spec = spec.clone();
+                            self.close_modal();
+                            self.run_delete_acl(spec);
+                        } else if c == 'n' || c == 'N' {
+                            self.close_modal();
+                        }
+                    }
+                    Modal::DeleteConnectorConfirm { name } => {
+                        if modal.is_yes(c) {
+                            let name = name.clone();
+                            self.close_modal();
+                            self.run_connect_delete(name);
+                        } else if c == 'n' || c == 'N' {
+                            self.close_modal();
+                        }
+                    }
                     _ => {
                         if let Some(m) = self.modal.as_mut() {
                             m.push_char(c);
@@ -266,6 +291,9 @@ impl App {
                     ViewStack::Groups(v) => v.table.filter = filter,
                     ViewStack::Labels(v) => v.table.filter = filter,
                     ViewStack::Contexts(v) => v.table.filter = filter,
+                    ViewStack::Acls(v) => v.table.filter = filter,
+                    ViewStack::Schemas(v) => v.table.filter = filter,
+                    ViewStack::Connectors(v) => v.table.filter = filter,
                     _ => {}
                 }
                 self.close_modal();
@@ -349,6 +377,51 @@ impl App {
                 self.apply_topic_label(label.trim(), add);
                 self.close_modal();
             }
+            Modal::AclForm {
+                edit,
+                replace,
+                resource_type,
+                resource_name,
+                pattern_type,
+                principal,
+                host,
+                operation,
+                permission,
+                ..
+            } => {
+                let spec = AclSpec {
+                    resource_type: resource_type.trim().to_string(),
+                    resource_name: resource_name.trim().to_string(),
+                    pattern_type: pattern_type.trim().to_string(),
+                    principal: principal.trim().to_string(),
+                    host: host.trim().to_string(),
+                    operation: operation.trim().to_string(),
+                    permission: permission.trim().to_string(),
+                };
+                if spec.principal.is_empty() {
+                    self.status = "principal is required".into();
+                    return;
+                }
+                if edit {
+                    if let Some(old) = replace {
+                        self.run_replace_acl(old, spec);
+                    } else {
+                        self.status = "edit: missing original ACL".into();
+                        return;
+                    }
+                } else {
+                    self.run_create_acl(spec);
+                }
+                self.close_modal();
+            }
+            Modal::DeleteAclConfirm { spec, .. } => {
+                self.run_delete_acl(spec);
+                self.close_modal();
+            }
+            Modal::DeleteConnectorConfirm { name } => {
+                self.run_connect_delete(name);
+                self.close_modal();
+            }
         }
     }
 
@@ -381,12 +454,27 @@ impl App {
                     self.filter_buf = v.table.filter.clone();
                     self.modal = Some(Modal::Filter);
                 }
+                ViewStack::Acls(v) => {
+                    self.filter_buf = v.table.filter.clone();
+                    self.modal = Some(Modal::Filter);
+                }
+                ViewStack::Schemas(v) => {
+                    self.filter_buf = v.table.filter.clone();
+                    self.modal = Some(Modal::Filter);
+                }
+                ViewStack::Connectors(v) => {
+                    self.filter_buf = v.table.filter.clone();
+                    self.modal = Some(Modal::Filter);
+                }
                 _ => {}
             },
             KeyCode::Char('1') => self.switch_nav(Screen::Topics),
             KeyCode::Char('2') => self.switch_nav(Screen::Groups),
             KeyCode::Char('3') => self.switch_nav(Screen::Labels),
             KeyCode::Char('4') => self.switch_nav(Screen::Contexts),
+            KeyCode::Char('5') => self.switch_nav(Screen::Acls),
+            KeyCode::Char('6') => self.switch_nav(Screen::Schemas),
+            KeyCode::Char('7') => self.switch_nav(Screen::Connectors),
             KeyCode::Char(' ') => {
                 if let ViewStack::Topics(v) = self.current_mut() {
                     v.toggle_mark();
@@ -443,39 +531,16 @@ impl App {
                         partitions: "3".into(),
                         field: ModalField::First,
                     });
+                } else if matches!(self.current(), ViewStack::Acls(_)) {
+                    self.open_acl_create();
                 }
             }
-            KeyCode::Char('d') => {
-                if let ViewStack::Messages(v) = self.current_mut() {
-                    v.scroll_detail_down(3);
-                } else if let ViewStack::Labels(v) = self.current() {
-                    if let Some(label) = v.selected_label() {
-                        let label = label.to_string();
-                        let count = self
-                            .config
-                            .topic_labels
-                            .label_topic_count(&self.cluster_name, &label);
-                        self.modal = Some(Modal::DeleteLabelConfirm {
-                            label,
-                            topic_count: count,
-                        });
-                    }
-                } else if let ViewStack::Groups(v) = self.current() {
-                    if let Some(group) = v.selected_group().cloned() {
-                        if !group.is_empty_or_dead() {
-                            self.status = format!(
-                                "cannot delete: group is {} (must be Empty/Dead)",
-                                group.state
-                            );
-                        } else {
-                            self.modal = Some(Modal::DeleteGroupConfirm { group: group.id });
-                        }
-                    }
-                } else if let Some(topic) = self.selected_topic_name() {
-                    if topic.starts_with('_') {
-                        self.status = "cannot delete internal topics".into();
+            KeyCode::Char('e') => {
+                if let ViewStack::Acls(v) = self.current() {
+                    if let Some(acl) = v.selected_acl().cloned() {
+                        self.open_acl_edit(&acl);
                     } else {
-                        self.modal = Some(Modal::DeleteConfirm { topic });
+                        self.status = "select an ACL first".into();
                     }
                 }
             }
@@ -566,28 +631,93 @@ impl App {
             KeyCode::Char('y') => self.copy_selected_message(),
             KeyCode::Char('g') => self.open_groups(),
             KeyCode::Char('R') => {
-                if let Some(group) = self.selected_group_id() {
+                if let ViewStack::ConnectorDetail(v) = self.current() {
+                    self.run_connect_restart(v.name.clone());
+                } else if let Some(group) = self.selected_group_id() {
                     self.modal = Some(Modal::ResetOffsets {
                         group,
                         spec: String::new(),
                     });
                 }
             }
+            KeyCode::Char('P') => {
+                if let ViewStack::ConnectorDetail(v) = self.current() {
+                    self.run_connect_pause(v.name.clone());
+                }
+            }
+            KeyCode::Char('O') => {
+                if let ViewStack::ConnectorDetail(v) = self.current() {
+                    self.run_connect_resume(v.name.clone());
+                }
+            }
             KeyCode::Char('u') => {
-                if matches!(self.current(), ViewStack::Messages(_)) {
-                    if let ViewStack::Messages(v) = self.current_mut() {
-                        v.scroll_detail_up(3);
+                match self.current_mut() {
+                    ViewStack::Messages(v) => v.scroll_detail_up(3),
+                    ViewStack::SchemaDetail(v) => v.scroll_detail_up(3),
+                    ViewStack::ConnectorDetail(v) => v.scroll_detail_up(3),
+                    _ => {}
+                }
+            }
+            KeyCode::Char('d') => {
+                if let ViewStack::ConnectorDetail(v) = self.current() {
+                    self.modal = Some(Modal::DeleteConnectorConfirm {
+                        name: v.name.clone(),
+                    });
+                } else if let ViewStack::Acls(v) = self.current() {
+                    if let Some(acl) = v.selected_acl() {
+                        let spec = acl.to_spec();
+                        let summary = acl_entry_summary(acl);
+                        self.modal = Some(Modal::DeleteAclConfirm { spec, summary });
+                    }
+                } else if let ViewStack::Messages(v) = self.current_mut() {
+                    v.scroll_detail_down(3);
+                } else if let ViewStack::SchemaDetail(v) = self.current_mut() {
+                    v.scroll_detail_down(3);
+                } else if let ViewStack::Labels(v) = self.current() {
+                    if let Some(label) = v.selected_label() {
+                        let label = label.to_string();
+                        let count = self
+                            .config
+                            .topic_labels
+                            .label_topic_count(&self.cluster_name, &label);
+                        self.modal = Some(Modal::DeleteLabelConfirm {
+                            label,
+                            topic_count: count,
+                        });
+                    }
+                } else if let ViewStack::Groups(v) = self.current() {
+                    if let Some(group) = v.selected_group().cloned() {
+                        if !group.is_empty_or_dead() {
+                            self.status = format!(
+                                "cannot delete: group is {} (must be Empty/Dead)",
+                                group.state
+                            );
+                        } else {
+                            self.modal = Some(Modal::DeleteGroupConfirm { group: group.id });
+                        }
+                    }
+                } else if let Some(topic) = self.selected_topic_name() {
+                    if topic.starts_with('_') {
+                        self.status = "cannot delete internal topics".into();
+                    } else {
+                        self.modal = Some(Modal::DeleteConfirm { topic });
                     }
                 }
             }
             KeyCode::PageUp => {
-                if let ViewStack::Messages(v) = self.current_mut() {
-                    v.scroll_detail_up(10);
+                match self.current_mut() {
+                    ViewStack::Messages(v) => v.scroll_detail_up(10),
+                    ViewStack::SchemaDetail(v) => v.scroll_detail_up(10),
+                    ViewStack::ConnectorDetail(v) => v.scroll_detail_up(10),
+                    _ => {}
                 }
             }
             KeyCode::PageDown => {
-                if let ViewStack::Messages(v) = self.current_mut() {
-                    v.scroll_detail_down(10);
+                match self.current_mut() {
+                    ViewStack::Messages(v) => v.scroll_detail_down(10),
+                    ViewStack::SchemaDetail(v) => v.scroll_detail_down(10),
+                    ViewStack::ConnectorDetail(v) => v.scroll_detail_down(10),
+                    _ => {}
                 }
             }
             _ => {}
@@ -602,7 +732,12 @@ impl App {
             ViewStack::Groups(_)
             | ViewStack::GroupDetails(_)
             | ViewStack::Labels(_)
-            | ViewStack::Contexts(_) => None,
+            | ViewStack::Contexts(_)
+            | ViewStack::Acls(_)
+            | ViewStack::Schemas(_)
+            | ViewStack::SchemaDetail(_)
+            | ViewStack::Connectors(_)
+            | ViewStack::ConnectorDetail(_) => None,
         }
     }
 
@@ -670,10 +805,23 @@ impl App {
             ViewStack::GroupDetails(v) => v.show_help = !v.show_help,
             ViewStack::Labels(v) => v.show_help = !v.show_help,
             ViewStack::Contexts(v) => v.show_help = !v.show_help,
+            ViewStack::Acls(v) => v.show_help = !v.show_help,
+            ViewStack::Schemas(v) => v.show_help = !v.show_help,
+            ViewStack::SchemaDetail(v) => v.show_help = !v.show_help,
+            ViewStack::Connectors(v) => v.show_help = !v.show_help,
+            ViewStack::ConnectorDetail(v) => v.show_help = !v.show_help,
         }
     }
 
     fn nav_down(&mut self) {
+        if let ViewStack::SchemaDetail(v) = self.current_mut() {
+            v.next_version();
+            if let Some(ver) = v.current_version() {
+                let subject = v.subject.clone();
+                self.reload_schema_version(subject, ver);
+            }
+            return;
+        }
         match self.current_mut() {
             ViewStack::Topics(v) => v.table.next(),
             ViewStack::Messages(v) => v.next(),
@@ -681,10 +829,22 @@ impl App {
             ViewStack::GroupDetails(v) => v.table.next(),
             ViewStack::Labels(v) => v.table.next(),
             ViewStack::Contexts(v) => v.table.next(),
+            ViewStack::Acls(v) => v.table.next(),
+            ViewStack::Schemas(v) => v.table.next(),
+            ViewStack::Connectors(v) => v.table.next(),
+            _ => {}
         }
     }
 
     fn nav_up(&mut self) {
+        if let ViewStack::SchemaDetail(v) = self.current_mut() {
+            v.prev_version();
+            if let Some(ver) = v.current_version() {
+                let subject = v.subject.clone();
+                self.reload_schema_version(subject, ver);
+            }
+            return;
+        }
         match self.current_mut() {
             ViewStack::Topics(v) => v.table.prev(),
             ViewStack::Messages(v) => v.prev(),
@@ -692,6 +852,10 @@ impl App {
             ViewStack::GroupDetails(v) => v.table.prev(),
             ViewStack::Labels(v) => v.table.prev(),
             ViewStack::Contexts(v) => v.table.prev(),
+            ViewStack::Acls(v) => v.table.prev(),
+            ViewStack::Schemas(v) => v.table.prev(),
+            ViewStack::Connectors(v) => v.table.prev(),
+            _ => {}
         }
     }
 
@@ -756,6 +920,16 @@ impl App {
                     } else {
                         self.switch_cluster(&name);
                     }
+                }
+            }
+            ViewStack::Schemas(v) => {
+                if let Some(subject) = v.selected_subject() {
+                    self.open_schema_detail(subject.to_string());
+                }
+            }
+            ViewStack::Connectors(v) => {
+                if let Some(name) = v.selected_name() {
+                    self.open_connector_detail(name.to_string());
                 }
             }
             _ => {}
@@ -842,7 +1016,145 @@ impl App {
                 }
                 self.status = "contexts refreshed".into();
             }
+            ViewStack::Acls(_) => self.refresh_acls(),
+            ViewStack::Schemas(_) => self.refresh_schemas(),
+            ViewStack::Connectors(_) => self.refresh_connectors(),
+            ViewStack::ConnectorDetail(v) => {
+                self.reload_connector_detail(v.name.clone());
+            }
+            ViewStack::SchemaDetail(v) => {
+                let subject = v.subject.clone();
+                if let Some(ver) = v.current_version() {
+                    self.reload_schema_version(subject, ver);
+                } else {
+                    self.reload_schema_versions(subject);
+                }
+            }
         }
+    }
+
+    fn schema_registry_config(&self) -> Option<SchemaRegistryConfig> {
+        self.cluster.schema_registry.clone()
+    }
+
+    fn refresh_schemas(&mut self) {
+        let Some(cfg) = self.schema_registry_config() else {
+            self.status =
+                "schema_registry not configured — add [clusters.<name>.schema_registry]".into();
+            return;
+        };
+        self.loading = true;
+        self.status = "loading schemas…".into();
+        spawn_list_schemas(cfg, self.worker_tx.clone());
+    }
+
+    fn kafka_connect_config(&self) -> Option<KafkaConnectConfig> {
+        self.cluster.kafka_connect.clone()
+    }
+
+    fn refresh_connectors(&mut self) {
+        let Some(cfg) = self.kafka_connect_config() else {
+            self.status =
+                "kafka_connect not configured — add [clusters.<name>.kafka_connect]".into();
+            return;
+        };
+        self.loading = true;
+        self.status = "loading connectors…".into();
+        spawn_list_connectors(cfg, self.worker_tx.clone());
+    }
+
+    fn open_connector_detail(&mut self, name: String) {
+        let Some(cfg) = self.kafka_connect_config() else {
+            self.status = "kafka_connect not configured".into();
+            return;
+        };
+        self.stack
+            .push(ViewStack::ConnectorDetail(ConnectorDetailView::new(&name)));
+        self.loading = true;
+        self.status = format!("loading connector {name}…");
+        spawn_connector_detail(cfg, name, self.worker_tx.clone());
+    }
+
+    fn reload_connector_detail(&mut self, name: String) {
+        let Some(cfg) = self.kafka_connect_config() else {
+            self.status = "kafka_connect not configured".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("reloading {name}…");
+        spawn_connector_detail(cfg, name, self.worker_tx.clone());
+    }
+
+    fn run_connect_pause(&mut self, name: String) {
+        let Some(cfg) = self.kafka_connect_config() else {
+            self.status = "kafka_connect not configured".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("pausing {name}…");
+        spawn_connect_pause(cfg, name, self.worker_tx.clone());
+    }
+
+    fn run_connect_resume(&mut self, name: String) {
+        let Some(cfg) = self.kafka_connect_config() else {
+            self.status = "kafka_connect not configured".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("resuming {name}…");
+        spawn_connect_resume(cfg, name, self.worker_tx.clone());
+    }
+
+    fn run_connect_restart(&mut self, name: String) {
+        let Some(cfg) = self.kafka_connect_config() else {
+            self.status = "kafka_connect not configured".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("restarting {name}…");
+        spawn_connect_restart(cfg, name, self.worker_tx.clone());
+    }
+
+    fn run_connect_delete(&mut self, name: String) {
+        let Some(cfg) = self.kafka_connect_config() else {
+            self.status = "kafka_connect not configured".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("deleting {name}…");
+        spawn_connect_delete(cfg, name, self.worker_tx.clone());
+    }
+
+    fn open_schema_detail(&mut self, subject: String) {
+        let Some(cfg) = self.schema_registry_config() else {
+            self.status = "schema_registry not configured".into();
+            return;
+        };
+        self.stack
+            .push(ViewStack::SchemaDetail(SchemaDetailView::new(&subject)));
+        self.loading = true;
+        self.status = format!("loading {subject}…");
+        spawn_schema_versions(cfg, subject, self.worker_tx.clone());
+    }
+
+    fn reload_schema_versions(&mut self, subject: String) {
+        let Some(cfg) = self.schema_registry_config() else {
+            self.status = "schema_registry not configured".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("loading versions for {subject}…");
+        spawn_schema_versions(cfg, subject, self.worker_tx.clone());
+    }
+
+    fn reload_schema_version(&mut self, subject: String, version: i32) {
+        let Some(cfg) = self.schema_registry_config() else {
+            self.status = "schema_registry not configured".into();
+            return;
+        };
+        self.loading = true;
+        self.status = format!("loading {subject} v{version}…");
+        spawn_schema_version(cfg, subject, version, self.worker_tx.clone());
     }
 
     fn refresh_groups(&mut self) {
@@ -913,7 +1225,97 @@ impl App {
                 self.stack = vec![ViewStack::Contexts(v)];
                 self.status = "contexts".into();
             }
+            Screen::Acls => {
+                self.stack = vec![ViewStack::Acls(AclsView::new())];
+                self.refresh_acls();
+            }
+            Screen::Schemas => {
+                self.stack = vec![ViewStack::Schemas(SchemasView::new())];
+                self.refresh_schemas();
+            }
+            Screen::Connectors => {
+                self.stack = vec![ViewStack::Connectors(ConnectorsView::new())];
+                self.refresh_connectors();
+            }
             _ => {}
+        }
+    }
+
+    fn open_acl_create(&mut self) {
+        self.modal = Some(Modal::AclForm {
+            edit: false,
+            replace: None,
+            resource_type: "topic".into(),
+            resource_name: String::new(),
+            pattern_type: "literal".into(),
+            principal: "User:".into(),
+            host: "*".into(),
+            operation: "read".into(),
+            permission: "allow".into(),
+            field: AclFormField::ResourceType,
+        });
+    }
+
+    fn open_acl_edit(&mut self, entry: &AclEntry) {
+        self.modal = Some(Modal::AclForm {
+            edit: true,
+            replace: Some(entry.to_spec()),
+            resource_type: entry.resource_type.clone(),
+            resource_name: entry.resource_name.clone(),
+            pattern_type: entry.pattern_type.clone(),
+            principal: entry.principal.clone(),
+            host: entry.host.clone(),
+            operation: entry.operation.clone(),
+            permission: entry.permission.clone(),
+            field: AclFormField::ResourceType,
+        });
+    }
+
+    fn run_create_acl(&mut self, spec: AclSpec) {
+        let Some(conn) = self.connection.as_ref() else {
+            self.status = "not connected".into();
+            return;
+        };
+        self.loading = true;
+        self.status = "creating ACL…".into();
+        if let Ok(conn) = conn.reconnect() {
+            spawn_create_acl(conn, spec, self.worker_tx.clone());
+        }
+    }
+
+    fn run_delete_acl(&mut self, spec: AclSpec) {
+        let Some(conn) = self.connection.as_ref() else {
+            self.status = "not connected".into();
+            return;
+        };
+        self.loading = true;
+        self.status = "deleting ACL…".into();
+        if let Ok(conn) = conn.reconnect() {
+            spawn_delete_acl(conn, spec, self.worker_tx.clone());
+        }
+    }
+
+    fn run_replace_acl(&mut self, old: AclSpec, new: AclSpec) {
+        let Some(conn) = self.connection.as_ref() else {
+            self.status = "not connected".into();
+            return;
+        };
+        self.loading = true;
+        self.status = "updating ACL…".into();
+        if let Ok(conn) = conn.reconnect() {
+            spawn_replace_acl(conn, old, new, self.worker_tx.clone());
+        }
+    }
+
+    fn refresh_acls(&mut self) {
+        let Some(conn) = self.connection.as_ref() else {
+            self.status = "not connected".into();
+            return;
+        };
+        self.loading = true;
+        self.status = "loading ACLs…".into();
+        if let Ok(conn) = conn.reconnect() {
+            spawn_list_acls(conn, self.worker_tx.clone());
         }
     }
 
@@ -1146,6 +1548,74 @@ impl App {
                 self.status = "ready".into();
             }
             WorkerMsg::Groups(Err(e)) => self.status = format!("groups error: {e:#}"),
+            WorkerMsg::Acls(Ok(acls)) => {
+                if let ViewStack::Acls(v) = self.current_mut() {
+                    v.load(acls);
+                }
+                self.status = "ready".into();
+            }
+            WorkerMsg::Acls(Err(e)) => self.status = format!("ACL error: {e:#}"),
+            WorkerMsg::Schemas(Ok(subjects)) => {
+                if let ViewStack::Schemas(v) = self.current_mut() {
+                    v.load(subjects);
+                }
+                self.status = "ready".into();
+            }
+            WorkerMsg::Schemas(Err(e)) => self.status = format!("schema registry error: {e:#}"),
+            WorkerMsg::Connectors(Ok(list)) => {
+                if let ViewStack::Connectors(v) = self.current_mut() {
+                    v.load(list);
+                }
+                self.status = "ready".into();
+            }
+            WorkerMsg::Connectors(Err(e)) => self.status = format!("kafka connect error: {e:#}"),
+            WorkerMsg::ConnectorDetail { name, result } => match result {
+                Ok(detail) => {
+                    if let ViewStack::ConnectorDetail(v) = self.current_mut() {
+                        if v.name == name {
+                            v.set_detail(detail);
+                        }
+                    }
+                    self.status = format!("connector {name}");
+                }
+                Err(e) => self.status = format!("connector error: {e:#}"),
+            },
+            WorkerMsg::SchemaVersions { subject, result } => match result {
+                Ok(mut versions) => {
+                    versions.sort_unstable();
+                    let ver = if let ViewStack::SchemaDetail(v) = self.current_mut() {
+                        if v.subject == subject {
+                            v.set_versions(versions);
+                            v.current_version()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(ver) = ver {
+                        self.reload_schema_version(subject, ver);
+                    } else {
+                        self.status = "ready".into();
+                    }
+                }
+                Err(e) => self.status = format!("schema versions error: {e:#}"),
+            },
+            WorkerMsg::SchemaVersion {
+                subject,
+                version,
+                result,
+            } => match result {
+                Ok(detail) => {
+                    if let ViewStack::SchemaDetail(v) = self.current_mut() {
+                        if v.subject == subject && v.current_version() == Some(version) {
+                            v.set_detail(detail);
+                        }
+                    }
+                    self.status = format!("{subject} v{version}");
+                }
+                Err(e) => self.status = format!("schema error: {e:#}"),
+            },
             WorkerMsg::GroupOffsets { group, result } => match result {
                 Ok((info, offsets)) => {
                     let n = offsets.len();
@@ -1169,6 +1639,9 @@ impl App {
                     msg.starts_with("created topic") || msg.starts_with("deleted topic");
                 let is_group_op = msg.starts_with("deleted group");
                 let is_reset = msg.starts_with("reset offsets");
+                let is_acl_op = msg.contains("ACL");
+                let is_connect_op = msg.contains("connector");
+                let deleted_connector = msg.contains("deleted connector");
                 self.status = msg;
 
                 match self.current() {
@@ -1181,6 +1654,17 @@ impl App {
                     ViewStack::GroupDetails(v) if is_reset => {
                         let g = v.group.clone();
                         self.reload_group_offsets(g);
+                    }
+                    ViewStack::Acls(_) if is_acl_op => self.refresh_acls(),
+                    ViewStack::Connectors(_) | ViewStack::ConnectorDetail(_) if is_connect_op => {
+                        self.refresh_connectors();
+                        if deleted_connector {
+                            if matches!(self.current(), ViewStack::ConnectorDetail(_)) {
+                                self.pop();
+                            }
+                        } else if let ViewStack::ConnectorDetail(v) = self.current() {
+                            self.reload_connector_detail(v.name.clone());
+                        }
                     }
                     _ => {}
                 }
@@ -1217,6 +1701,11 @@ impl App {
             ViewStack::GroupDetails(v) => v.show_help,
             ViewStack::Labels(v) => v.show_help,
             ViewStack::Contexts(v) => v.show_help,
+            ViewStack::Acls(v) => v.show_help,
+            ViewStack::Schemas(v) => v.show_help,
+            ViewStack::SchemaDetail(v) => v.show_help,
+            ViewStack::Connectors(v) => v.show_help,
+            ViewStack::ConnectorDetail(v) => v.show_help,
         };
         let show_sidebar = self.stack.len() == 1 && self.current().is_root_nav();
         let root_screen = self.current().root_screen();
@@ -1243,6 +1732,21 @@ impl App {
                 frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
             ),
             ViewStack::Contexts(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::Acls(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::Schemas(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::SchemaDetail(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::Connectors(v) => v.render(
+                frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
+            ),
+            ViewStack::ConnectorDetail(v) => v.render(
                 frame, chunks[0], chunks[1], chunks[2], &cluster, &status, loading,
             ),
         }
@@ -1310,6 +1814,13 @@ fn format_partitions(parts: &[PartitionInfo]) -> Vec<String> {
 
 /// Парсит строку формата `earliest` / `latest` / `offset:N` / `timestamp:UNIX_MS`
 /// в `ResetStrategy`. Ошибка возвращается как пользовательская строка статуса.
+fn acl_entry_summary(a: &AclEntry) -> String {
+    format!(
+        "{} {} · {} · {} · {} · {}",
+        a.resource_type, a.resource_name, a.principal, a.host, a.operation, a.permission
+    )
+}
+
 fn parse_reset_spec(spec: &str) -> Result<ResetStrategy, String> {
     let spec = spec.trim();
     if spec.eq_ignore_ascii_case("earliest") {

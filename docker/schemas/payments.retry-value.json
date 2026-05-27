@@ -1,0 +1,3 @@
+{
+  "schema": "{\"type\":\"record\",\"name\":\"Payment\",\"namespace\":\"com.example.payments\",\"fields\":[{\"name\":\"paymentId\",\"type\":\"string\"},{\"name\":\"status\",\"type\":\"string\"},{\"name\":\"retryCount\",\"type\":\"int\"}]}"
+}

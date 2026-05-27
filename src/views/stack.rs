@@ -1,5 +1,6 @@
 use super::{
-    ContextListView, GroupDetailsView, GroupsView, LabelListView, MessagesView, TopicsView,
+    AclsView, ConnectorDetailView, ConnectorsView, ContextListView, GroupDetailsView,
+    GroupsView, LabelListView, MessagesView, SchemaDetailView, SchemasView, TopicsView,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,6 +11,11 @@ pub enum Screen {
     GroupDetails,
     Labels,
     Contexts,
+    Acls,
+    Schemas,
+    SchemaDetail,
+    Connectors,
+    ConnectorDetail,
 }
 
 pub enum ViewStack {
@@ -19,6 +25,11 @@ pub enum ViewStack {
     GroupDetails(GroupDetailsView),
     Labels(LabelListView),
     Contexts(ContextListView),
+    Acls(AclsView),
+    Schemas(SchemasView),
+    SchemaDetail(SchemaDetailView),
+    Connectors(ConnectorsView),
+    ConnectorDetail(ConnectorDetailView),
 }
 
 impl ViewStack {
@@ -30,6 +41,11 @@ impl ViewStack {
             ViewStack::GroupDetails(_) => Screen::GroupDetails,
             ViewStack::Labels(_) => Screen::Labels,
             ViewStack::Contexts(_) => Screen::Contexts,
+            ViewStack::Acls(_) => Screen::Acls,
+            ViewStack::Schemas(_) => Screen::Schemas,
+            ViewStack::SchemaDetail(_) => Screen::SchemaDetail,
+            ViewStack::Connectors(_) => Screen::Connectors,
+            ViewStack::ConnectorDetail(_) => Screen::ConnectorDetail,
         }
     }
 
@@ -38,6 +54,8 @@ impl ViewStack {
         match self {
             ViewStack::Messages(_) => Screen::Topics,
             ViewStack::GroupDetails(_) => Screen::Groups,
+            ViewStack::SchemaDetail(_) => Screen::Schemas,
+            ViewStack::ConnectorDetail(_) => Screen::Connectors,
             other => other.screen(),
         }
     }
@@ -49,6 +67,9 @@ impl ViewStack {
                 | ViewStack::Groups(_)
                 | ViewStack::Labels(_)
                 | ViewStack::Contexts(_)
+                | ViewStack::Acls(_)
+                | ViewStack::Schemas(_)
+                | ViewStack::Connectors(_)
         )
     }
 
@@ -60,6 +81,11 @@ impl ViewStack {
             ViewStack::GroupDetails(v) => &v.table.title,
             ViewStack::Labels(v) => &v.table.title,
             ViewStack::Contexts(v) => &v.table.title,
+            ViewStack::Acls(v) => &v.table.title,
+            ViewStack::Schemas(v) => &v.table.title,
+            ViewStack::SchemaDetail(v) => &v.title,
+            ViewStack::Connectors(v) => &v.table.title,
+            ViewStack::ConnectorDetail(v) => &v.title,
         }
     }
 }
