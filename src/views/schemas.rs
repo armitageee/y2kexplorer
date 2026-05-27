@@ -1,27 +1,17 @@
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
-use y2kexplorer::schema_registry::SchemaSubjectSummary;
 use crate::ui::{draw_help, draw_status, TableView};
+use y2kexplorer::schema_registry::SchemaSubjectSummary;
 
 const HELP: &[&str] = &[
-    "j/k",
-    "nav",
-    "Enter",
-    "schema",
-    "/",
-    "filter",
-    "r",
-    "refresh",
-    "Esc",
-    "back",
-    "?",
-    "help",
-    "q",
-    "quit",
+    "j/k", "nav", "Enter", "schema", "/", "filter", "r", "refresh", "Esc", "back", "?", "help",
+    "q", "quit",
 ];
 
-const HINT: &[&str] = &["Enter", "detail", "/", "filter", "r", "refresh", "?", "help"];
+const HINT: &[&str] = &[
+    "Enter", "detail", "/", "filter", "r", "refresh", "?", "help",
+];
 
 pub struct SchemasView {
     pub table: TableView,

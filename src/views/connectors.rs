@@ -5,23 +5,13 @@ use crate::kafka_connect::ConnectorSummary;
 use crate::ui::{draw_help, draw_status, TableView};
 
 const HELP: &[&str] = &[
-    "j/k",
-    "nav",
-    "Enter",
-    "detail",
-    "/",
-    "filter",
-    "r",
-    "refresh",
-    "Esc",
-    "back",
-    "?",
-    "help",
-    "q",
-    "quit",
+    "j/k", "nav", "Enter", "detail", "/", "filter", "r", "refresh", "Esc", "back", "?", "help",
+    "q", "quit",
 ];
 
-const HINT: &[&str] = &["Enter", "detail", "/", "filter", "r", "refresh", "?", "help"];
+const HINT: &[&str] = &[
+    "Enter", "detail", "/", "filter", "r", "refresh", "?", "help",
+];
 
 pub struct ConnectorsView {
     pub table: TableView,
@@ -34,12 +24,7 @@ impl ConnectorsView {
         Self {
             table: TableView::new(
                 "Connectors",
-                vec![
-                    "NAME".into(),
-                    "TYPE".into(),
-                    "STATE".into(),
-                    "TASKS".into(),
-                ],
+                vec!["NAME".into(), "TYPE".into(), "STATE".into(), "TASKS".into()],
             ),
             show_help: false,
             connectors: Vec::new(),

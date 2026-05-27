@@ -159,30 +159,6 @@ fn basic_auth(user: &str, pass: &str) -> String {
     format!("Basic {encoded}")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::SchemaRegistryConfig;
-
-    #[test]
-    #[ignore = "requires docker compose: schema-registry on :8081"]
-    fn list_summaries_local() {
-        let cfg = SchemaRegistryConfig {
-            url: "http://localhost:8081".into(),
-            username: None,
-            password: None,
-            tls: false,
-        };
-        let client = SchemaRegistryClient::new(&cfg).expect("client");
-        let summaries = client.list_summaries().expect("list");
-        assert!(!summaries.is_empty(), "expected demo schemas");
-        assert!(
-            summaries.iter().any(|s| s.subject == "orders-value"),
-            "expected orders-value"
-        );
-    }
-}
-
 fn base64_encode(data: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -205,4 +181,28 @@ fn base64_encode(data: &[u8]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SchemaRegistryConfig;
+
+    #[test]
+    #[ignore = "requires docker compose: schema-registry on :8081"]
+    fn list_summaries_local() {
+        let cfg = SchemaRegistryConfig {
+            url: "http://localhost:8081".into(),
+            username: None,
+            password: None,
+            tls: false,
+        };
+        let client = SchemaRegistryClient::new(&cfg).expect("client");
+        let summaries = client.list_summaries().expect("list");
+        assert!(!summaries.is_empty(), "expected demo schemas");
+        assert!(
+            summaries.iter().any(|s| s.subject == "orders-value"),
+            "expected orders-value"
+        );
+    }
 }

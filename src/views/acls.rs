@@ -5,26 +5,8 @@ use crate::kafka::AclEntry;
 use crate::ui::{draw_help, draw_status, TableView};
 
 const HELP: &[&str] = &[
-    "j/k",
-    "nav",
-    ":",
-    "command",
-    "/",
-    "filter",
-    "c",
-    "create",
-    "e",
-    "edit",
-    "d",
-    "delete",
-    "r",
-    "refresh",
-    "Esc",
-    "back",
-    "?",
-    "help",
-    "q",
-    "quit",
+    "j/k", "nav", ":", "command", "/", "filter", "c", "create", "e", "edit", "d", "delete", "r",
+    "refresh", "Esc", "back", "?", "help", "q", "quit",
 ];
 
 const HINT: &[&str] = &[

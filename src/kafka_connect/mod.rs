@@ -170,16 +170,8 @@ impl KafkaConnectClient {
 fn summary_from_entry(name: &str, entry: ExpandEntry) -> Result<ConnectorSummary> {
     let status = entry.status.unwrap_or_default();
     let tasks_total = status.tasks.len();
-    let tasks_running = status
-        .tasks
-        .iter()
-        .filter(|t| t.state == "RUNNING")
-        .count();
-    let tasks_failed = status
-        .tasks
-        .iter()
-        .filter(|t| t.state == "FAILED")
-        .count();
+    let tasks_running = status.tasks.iter().filter(|t| t.state == "RUNNING").count();
+    let tasks_failed = status.tasks.iter().filter(|t| t.state == "FAILED").count();
     let kind = entry
         .info
         .as_ref()
@@ -249,10 +241,7 @@ struct TaskEntry {
     trace: Option<String>,
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(
-    response: ureq::Response,
-    url: &str,
-) -> Result<T> {
+fn read_json<T: for<'de> Deserialize<'de>>(response: ureq::Response, url: &str) -> Result<T> {
     let status = response.status();
     let mut body = String::new();
     response

@@ -3,8 +3,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use y2kexplorer::schema_registry::SchemaVersionDetail;
 use crate::ui::{draw_help, draw_status, theme};
+use y2kexplorer::schema_registry::SchemaVersionDetail;
 
 const HELP: &[&str] = &[
     "j/k",
@@ -23,7 +23,9 @@ const HELP: &[&str] = &[
     "quit",
 ];
 
-const HINT: &[&str] = &["j/k", "version", "u/d", "scroll", "Esc", "back", "?", "help"];
+const HINT: &[&str] = &[
+    "j/k", "version", "u/d", "scroll", "Esc", "back", "?", "help",
+];
 
 pub struct SchemaDetailView {
     pub subject: String,
@@ -99,11 +101,7 @@ impl SchemaDetailView {
         status: &str,
         loading: bool,
     ) {
-        let chunks = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Min(5),
-        ])
-        .split(main);
+        let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(5)]).split(main);
 
         let meta = if let Some(d) = &self.detail {
             format!(

@@ -10,7 +10,9 @@ use crate::kafka::{
     ResetStrategy, TopicInfo,
 };
 use y2kexplorer::kafka_connect::{ConnectorDetail, ConnectorSummary, KafkaConnectClient};
-use y2kexplorer::schema_registry::{SchemaRegistryClient, SchemaSubjectSummary, SchemaVersionDetail};
+use y2kexplorer::schema_registry::{
+    SchemaRegistryClient, SchemaSubjectSummary, SchemaVersionDetail,
+};
 
 pub enum WorkerMsg {
     Topics(Result<Vec<TopicInfo>>),
@@ -185,7 +187,9 @@ pub fn spawn_create_acl(conn: ClusterConnection, spec: AclSpec, tx: mpsc::Sender
 
 pub fn spawn_delete_acl(conn: ClusterConnection, spec: AclSpec, tx: mpsc::Sender<WorkerMsg>) {
     thread::spawn(move || {
-        let result = conn.delete_acl(&spec).map(|n| format!("deleted {n} ACL(s)"));
+        let result = conn
+            .delete_acl(&spec)
+            .map(|n| format!("deleted {n} ACL(s)"));
         let _ = tx.send(WorkerMsg::Op(result));
     });
 }
@@ -211,11 +215,7 @@ pub fn spawn_list_connectors(cfg: KafkaConnectConfig, tx: mpsc::Sender<WorkerMsg
     });
 }
 
-pub fn spawn_connector_detail(
-    cfg: KafkaConnectConfig,
-    name: String,
-    tx: mpsc::Sender<WorkerMsg>,
-) {
+pub fn spawn_connector_detail(cfg: KafkaConnectConfig, name: String, tx: mpsc::Sender<WorkerMsg>) {
     thread::spawn(move || {
         let result = KafkaConnectClient::new(&cfg).and_then(|c| c.get_detail(&name));
         let _ = tx.send(WorkerMsg::ConnectorDetail { name, result });
@@ -288,8 +288,7 @@ pub fn spawn_schema_version(
     tx: mpsc::Sender<WorkerMsg>,
 ) {
     thread::spawn(move || {
-        let result =
-            SchemaRegistryClient::new(&cfg).and_then(|c| c.get_version(&subject, version));
+        let result = SchemaRegistryClient::new(&cfg).and_then(|c| c.get_version(&subject, version));
         let _ = tx.send(WorkerMsg::SchemaVersion {
             subject,
             version,

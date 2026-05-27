@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use rdkafka::bindings::{
-    self as rdsys, rd_kafka_AclBinding_t, rd_kafka_AclBindingFilter_t, rd_kafka_AclOperation_t,
+    self as rdsys, rd_kafka_AclBindingFilter_t, rd_kafka_AclBinding_t, rd_kafka_AclOperation_t,
     rd_kafka_AclPermissionType_t, rd_kafka_AdminOptions_t, rd_kafka_ResourcePatternType_t,
     rd_kafka_ResourceType_t, rd_kafka_t,
 };
@@ -82,13 +82,7 @@ pub fn create_acl(rk: *mut rd_kafka_t, spec: &AclSpec) -> Result<()> {
         rdsys::rd_kafka_admin_op_t::RD_KAFKA_ADMIN_OP_CREATEACLS,
         rdsys::RD_KAFKA_EVENT_CREATEACLS_RESULT,
         |rk, opts, queue| unsafe {
-            rdsys::rd_kafka_CreateAcls(
-                rk,
-                arr.as_mut_ptr(),
-                arr.len(),
-                opts,
-                queue,
-            );
+            rdsys::rd_kafka_CreateAcls(rk, arr.as_mut_ptr(), arr.len(), opts, queue);
         },
         |ev| unsafe {
             let res = rdsys::rd_kafka_event_CreateAcls_result(ev);
@@ -259,8 +253,7 @@ unsafe fn poll_event(
     queue: *mut rdsys::rd_kafka_queue_t,
     expect_type: i32,
 ) -> Result<*mut rdsys::rd_kafka_event_t> {
-    let deadline =
-        std::time::Instant::now() + Duration::from_millis(TIMEOUT_MS as u64);
+    let deadline = std::time::Instant::now() + Duration::from_millis(TIMEOUT_MS as u64);
     loop {
         let ev = rdsys::rd_kafka_queue_poll(queue, POLL_MS);
         if !ev.is_null() {
@@ -301,8 +294,12 @@ fn new_binding(spec: &AclSpec) -> Result<*mut rd_kafka_AclBinding_t> {
     let operation = parse_operation(&spec.operation)?;
     let permission = parse_permission(&spec.permission)?;
     let principal = CString::new(spec.principal.as_str()).context("principal")?;
-    let host = CString::new(if spec.host.is_empty() { "*" } else { &spec.host })
-        .context("host")?;
+    let host = CString::new(if spec.host.is_empty() {
+        "*"
+    } else {
+        &spec.host
+    })
+    .context("host")?;
     let name_c = CString::new(name).context("resource name")?;
 
     let mut err_buf = vec![0i8; ERR_BUF];
@@ -320,10 +317,7 @@ fn new_binding(spec: &AclSpec) -> Result<*mut rd_kafka_AclBinding_t> {
         )
     };
     if ptr.is_null() {
-        return Err(anyhow!(
-            "AclBinding_new: {}",
-            err_buf_to_str(&err_buf)
-        ));
+        return Err(anyhow!("AclBinding_new: {}", err_buf_to_str(&err_buf)));
     }
     Ok(ptr)
 }
@@ -358,9 +352,7 @@ fn new_binding_filter_wildcard(
     permission: rd_kafka_AclPermissionType_t,
 ) -> Result<*mut rd_kafka_AclBindingFilter_t> {
     let name_ptr = name.map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
-    let principal_ptr = principal
-        .map(|c| c.as_ptr())
-        .unwrap_or(std::ptr::null());
+    let principal_ptr = principal.map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
     let host_ptr = host.map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
 
     let mut err_buf = vec![0i8; ERR_BUF];
@@ -386,13 +378,8 @@ fn new_binding_filter_wildcard(
     Ok(ptr)
 }
 
-fn filter_name_ptr(
-    restype: rd_kafka_ResourceType_t,
-    name: &str,
-) -> Result<Option<CString>> {
-    if name.is_empty()
-        && restype == rdsys::rd_kafka_ResourceType_t::RD_KAFKA_RESOURCE_ANY
-    {
+fn filter_name_ptr(restype: rd_kafka_ResourceType_t, name: &str) -> Result<Option<CString>> {
+    if name.is_empty() && restype == rdsys::rd_kafka_ResourceType_t::RD_KAFKA_RESOURCE_ANY {
         return Ok(None);
     }
     Ok(Some(CString::new(name).context("resource name")?))
@@ -403,9 +390,7 @@ fn filter_optional_cstr(value: &str, field: &'static str) -> Result<Option<CStri
     if v.is_empty() || v == "*" {
         return Ok(None);
     }
-    CString::new(v)
-        .with_context(|| field.to_string())
-        .map(Some)
+    CString::new(v).with_context(|| field.to_string()).map(Some)
 }
 
 unsafe fn parse_acl_bindings(
@@ -451,8 +436,8 @@ unsafe fn parse_acl_binding(acl: *const rd_kafka_AclBinding_t) -> Result<AclEntr
         .unwrap_or_else(|| format!("{pattern:?}"));
 
     let op = rdsys::rd_kafka_AclBinding_operation(acl);
-    let operation = cstr_name(rdsys::rd_kafka_AclOperation_name(op))
-        .unwrap_or_else(|| format!("{op:?}"));
+    let operation =
+        cstr_name(rdsys::rd_kafka_AclOperation_name(op)).unwrap_or_else(|| format!("{op:?}"));
 
     let perm = rdsys::rd_kafka_AclBinding_permission_type(acl);
     let permission = cstr_name(rdsys::rd_kafka_AclPermissionType_name(perm))

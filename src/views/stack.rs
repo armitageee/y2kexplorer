@@ -1,6 +1,6 @@
 use super::{
-    AclsView, ConnectorDetailView, ConnectorsView, ContextListView, GroupDetailsView,
-    GroupsView, LabelListView, MessagesView, SchemaDetailView, SchemasView, TopicsView,
+    AclsView, ConnectorDetailView, ConnectorsView, ContextListView, GroupDetailsView, GroupsView,
+    LabelListView, MessagesView, SchemaDetailView, SchemasView, TopicsView,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

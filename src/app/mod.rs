@@ -12,11 +12,11 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
 use crate::config::{clamp_live_poll_secs, clamp_watermark_parallelism, AppConfig, ClusterConfig};
+use crate::config::{KafkaConnectConfig, SchemaRegistryConfig};
 use crate::kafka::{
     AclEntry, AclSpec, ClusterConnection, ListTopicsOptions, PartitionInfo, ResetStrategy,
     TopicInfo,
 };
-use crate::config::{KafkaConnectConfig, SchemaRegistryConfig};
 use crate::views::{
     AclsView, ConnectorDetailView, ConnectorsView, ContextListView, GroupDetailsView, GroupsView,
     LabelListView, MessagesView, SchemaDetailView, SchemasView, Screen, TopicsView, ViewStack,
@@ -28,9 +28,9 @@ use worker::{
     spawn_connect_delete, spawn_connect_pause, spawn_connect_restart, spawn_connect_resume,
     spawn_connector_detail, spawn_create_acl, spawn_create_topic, spawn_delete_acl,
     spawn_delete_group, spawn_delete_topic, spawn_fetch_messages, spawn_group_offsets,
-    spawn_list_acls, spawn_list_connectors, spawn_list_groups, spawn_list_schemas, spawn_list_topics,
-    spawn_poll_live_messages, spawn_produce, spawn_replace_acl, spawn_reset_group_offsets,
-    spawn_schema_version, spawn_schema_versions, WorkerMsg,
+    spawn_list_acls, spawn_list_connectors, spawn_list_groups, spawn_list_schemas,
+    spawn_list_topics, spawn_poll_live_messages, spawn_produce, spawn_replace_acl,
+    spawn_reset_group_offsets, spawn_schema_version, spawn_schema_versions, WorkerMsg,
 };
 
 pub struct App {
@@ -650,14 +650,12 @@ impl App {
                     self.run_connect_resume(v.name.clone());
                 }
             }
-            KeyCode::Char('u') => {
-                match self.current_mut() {
-                    ViewStack::Messages(v) => v.scroll_detail_up(3),
-                    ViewStack::SchemaDetail(v) => v.scroll_detail_up(3),
-                    ViewStack::ConnectorDetail(v) => v.scroll_detail_up(3),
-                    _ => {}
-                }
-            }
+            KeyCode::Char('u') => match self.current_mut() {
+                ViewStack::Messages(v) => v.scroll_detail_up(3),
+                ViewStack::SchemaDetail(v) => v.scroll_detail_up(3),
+                ViewStack::ConnectorDetail(v) => v.scroll_detail_up(3),
+                _ => {}
+            },
             KeyCode::Char('d') => {
                 if let ViewStack::ConnectorDetail(v) = self.current() {
                     self.modal = Some(Modal::DeleteConnectorConfirm {
@@ -704,22 +702,18 @@ impl App {
                     }
                 }
             }
-            KeyCode::PageUp => {
-                match self.current_mut() {
-                    ViewStack::Messages(v) => v.scroll_detail_up(10),
-                    ViewStack::SchemaDetail(v) => v.scroll_detail_up(10),
-                    ViewStack::ConnectorDetail(v) => v.scroll_detail_up(10),
-                    _ => {}
-                }
-            }
-            KeyCode::PageDown => {
-                match self.current_mut() {
-                    ViewStack::Messages(v) => v.scroll_detail_down(10),
-                    ViewStack::SchemaDetail(v) => v.scroll_detail_down(10),
-                    ViewStack::ConnectorDetail(v) => v.scroll_detail_down(10),
-                    _ => {}
-                }
-            }
+            KeyCode::PageUp => match self.current_mut() {
+                ViewStack::Messages(v) => v.scroll_detail_up(10),
+                ViewStack::SchemaDetail(v) => v.scroll_detail_up(10),
+                ViewStack::ConnectorDetail(v) => v.scroll_detail_up(10),
+                _ => {}
+            },
+            KeyCode::PageDown => match self.current_mut() {
+                ViewStack::Messages(v) => v.scroll_detail_down(10),
+                ViewStack::SchemaDetail(v) => v.scroll_detail_down(10),
+                ViewStack::ConnectorDetail(v) => v.scroll_detail_down(10),
+                _ => {}
+            },
             _ => {}
         }
         Ok(())

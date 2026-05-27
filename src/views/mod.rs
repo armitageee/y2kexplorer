@@ -2,12 +2,12 @@ mod acls;
 mod connector_detail;
 mod connectors;
 mod context_list;
-mod schema_detail;
-mod schemas;
 mod group_details;
 mod groups;
 mod label_list;
 mod messages;
+mod schema_detail;
+mod schemas;
 mod stack;
 mod topics;
 
