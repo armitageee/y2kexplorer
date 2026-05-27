@@ -17,6 +17,8 @@
 [k9s](https://github.com/derailed/k9s), но на Rust + [ratatui](https://docs.rs/ratatui),
 со скином в эстетике Y2K/PS2: тёмно-синий фон, хром-циан, магента-акценты, двойные рамки.
 
+[![asciicast](https://asciinema.org/a/mtFnSVROdvCeQkC7.svg)](https://asciinema.org/a/mtFnSVROdvCeQkC7)
+
 ## Возможности
 
 - **Topics** — список с фильтром (`/`), колонки partitions / replication / messages
