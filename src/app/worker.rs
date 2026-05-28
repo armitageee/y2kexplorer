@@ -4,9 +4,14 @@ use std::thread;
 
 use anyhow::Result;
 
-use crate::config::ClusterConfig;
+use crate::config::{ClusterConfig, KafkaConnectConfig, SchemaRegistryConfig};
 use crate::kafka::{
-    ClusterConnection, ConsumerGroupInfo, FetchedMessage, GroupOffset, ResetStrategy, TopicInfo,
+    AclEntry, AclSpec, ClusterConnection, ConsumerGroupInfo, FetchedMessage, GroupOffset,
+    ResetStrategy, TopicInfo,
+};
+use y2kexplorer::kafka_connect::{ConnectorDetail, ConnectorSummary, KafkaConnectClient};
+use y2kexplorer::schema_registry::{
+    SchemaRegistryClient, SchemaSubjectSummary, SchemaVersionDetail,
 };
 
 pub enum WorkerMsg {
@@ -23,6 +28,22 @@ pub enum WorkerMsg {
     GroupOffsets {
         group: String,
         result: Result<(ConsumerGroupInfo, Vec<GroupOffset>)>,
+    },
+    Acls(Result<Vec<AclEntry>>),
+    Schemas(Result<Vec<SchemaSubjectSummary>>),
+    Connectors(Result<Vec<ConnectorSummary>>),
+    ConnectorDetail {
+        name: String,
+        result: Result<ConnectorDetail>,
+    },
+    SchemaVersions {
+        subject: String,
+        result: Result<Vec<i32>>,
+    },
+    SchemaVersion {
+        subject: String,
+        version: i32,
+        result: Result<SchemaVersionDetail>,
     },
     Op(Result<String>),
 }
@@ -146,5 +167,132 @@ pub fn spawn_delete_group(conn: ClusterConnection, group: String, tx: mpsc::Send
             .delete_consumer_group(&group)
             .map(|_| format!("deleted group '{group}'"));
         let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_list_acls(conn: ClusterConnection, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let _ = tx.send(WorkerMsg::Acls(conn.list_acls()));
+    });
+}
+
+pub fn spawn_create_acl(conn: ClusterConnection, spec: AclSpec, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = conn
+            .create_acl(&spec)
+            .map(|_| format!("created ACL for {}", spec.principal));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_delete_acl(conn: ClusterConnection, spec: AclSpec, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = conn
+            .delete_acl(&spec)
+            .map(|n| format!("deleted {n} ACL(s)"));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_replace_acl(
+    conn: ClusterConnection,
+    old: AclSpec,
+    new: AclSpec,
+    tx: mpsc::Sender<WorkerMsg>,
+) {
+    thread::spawn(move || {
+        let result = conn
+            .replace_acl(&old, &new)
+            .map(|_| format!("updated ACL for {}", new.principal));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_list_connectors(cfg: KafkaConnectConfig, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = KafkaConnectClient::new(&cfg).and_then(|c| c.list_summaries());
+        let _ = tx.send(WorkerMsg::Connectors(result));
+    });
+}
+
+pub fn spawn_connector_detail(cfg: KafkaConnectConfig, name: String, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = KafkaConnectClient::new(&cfg).and_then(|c| c.get_detail(&name));
+        let _ = tx.send(WorkerMsg::ConnectorDetail { name, result });
+    });
+}
+
+pub fn spawn_connect_restart(cfg: KafkaConnectConfig, name: String, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = KafkaConnectClient::new(&cfg)
+            .and_then(|c| c.restart(&name))
+            .map(|_| format!("restarted connector '{name}'"));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_connect_pause(cfg: KafkaConnectConfig, name: String, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = KafkaConnectClient::new(&cfg)
+            .and_then(|c| c.pause(&name))
+            .map(|_| format!("paused connector '{name}'"));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_connect_resume(cfg: KafkaConnectConfig, name: String, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = KafkaConnectClient::new(&cfg)
+            .and_then(|c| c.resume(&name))
+            .map(|_| format!("resumed connector '{name}'"));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_connect_delete(cfg: KafkaConnectConfig, name: String, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = KafkaConnectClient::new(&cfg)
+            .and_then(|c| c.delete(&name))
+            .map(|_| format!("deleted connector '{name}'"));
+        let _ = tx.send(WorkerMsg::Op(result));
+    });
+}
+
+pub fn spawn_list_schemas(cfg: SchemaRegistryConfig, tx: mpsc::Sender<WorkerMsg>) {
+    thread::spawn(move || {
+        let result = SchemaRegistryClient::new(&cfg).and_then(|c| c.list_summaries());
+        let _ = tx.send(WorkerMsg::Schemas(result));
+    });
+}
+
+pub fn spawn_schema_versions(
+    cfg: SchemaRegistryConfig,
+    subject: String,
+    tx: mpsc::Sender<WorkerMsg>,
+) {
+    thread::spawn(move || {
+        let result = SchemaRegistryClient::new(&cfg)
+            .and_then(|c| c.list_versions(&subject))
+            .map(|mut v| {
+                v.sort_unstable();
+                v
+            });
+        let _ = tx.send(WorkerMsg::SchemaVersions { subject, result });
+    });
+}
+
+pub fn spawn_schema_version(
+    cfg: SchemaRegistryConfig,
+    subject: String,
+    version: i32,
+    tx: mpsc::Sender<WorkerMsg>,
+) {
+    thread::spawn(move || {
+        let result = SchemaRegistryClient::new(&cfg).and_then(|c| c.get_version(&subject, version));
+        let _ = tx.send(WorkerMsg::SchemaVersion {
+            subject,
+            version,
+            result,
+        });
     });
 }

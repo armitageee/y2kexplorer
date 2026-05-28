@@ -707,6 +707,30 @@ impl ClusterConnection {
         }
         Ok(())
     }
+
+    fn admin_native(&self) -> *mut rdkafka::bindings::rd_kafka_t {
+        self.admin.inner().native_ptr()
+    }
+
+    pub fn list_acls(&self) -> Result<Vec<crate::kafka::AclEntry>> {
+        crate::kafka::acl::list_acls(self.admin_native())
+    }
+
+    pub fn create_acl(&self, spec: &crate::kafka::AclSpec) -> Result<()> {
+        crate::kafka::acl::create_acl(self.admin_native(), spec)
+    }
+
+    pub fn delete_acl(&self, spec: &crate::kafka::AclSpec) -> Result<usize> {
+        crate::kafka::acl::delete_acl(self.admin_native(), spec)
+    }
+
+    pub fn replace_acl(
+        &self,
+        old: &crate::kafka::AclSpec,
+        new: &crate::kafka::AclSpec,
+    ) -> Result<()> {
+        crate::kafka::acl::replace_acl(self.admin_native(), old, new)
+    }
 }
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
@@ -730,16 +754,16 @@ fn message_to_fetched<M: Message>(m: &M) -> FetchedMessage {
 
 fn sort_fetched(out: &mut [FetchedMessage], single_partition: bool, sort_by_time: bool) {
     if single_partition {
-        out.sort_by_key(|m| m.offset);
+        out.sort_by_key(|m| std::cmp::Reverse(m.offset));
     } else if sort_by_time {
         out.sort_by(|a, b| match (a.timestamp_ms, b.timestamp_ms) {
-            (Some(ta), Some(tb)) => ta.cmp(&tb),
+            (Some(ta), Some(tb)) => tb.cmp(&ta),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
+            (None, None) => (b.partition, b.offset).cmp(&(a.partition, a.offset)),
         });
     } else {
-        out.sort_by_key(|m| (m.partition, m.offset));
+        out.sort_by_key(|m| std::cmp::Reverse((m.partition, m.offset)));
     }
 }
 
@@ -891,11 +915,53 @@ mod tests {
 
     #[test]
     #[ignore = "requires local Kafka: docker compose up -d"]
+    fn list_acls_from_local_docker() {
+        let cluster = ClusterConfig {
+            brokers: vec!["localhost:9092".into()],
+            auth: AuthConfig::SaslPlain {
+                username: "admin".into(),
+                password: "admin-secret".into(),
+                tls: false,
+            },
+            client_id: Some("y2kexplorer-test".into()),
+            schema_registry: None,
+            kafka_connect: None,
+        };
+        let conn = ClusterConnection::connect(&cluster).expect("connect");
+        let acls = conn.list_acls().expect("list acls");
+        eprintln!("acls ({})", acls.len());
+        for a in &acls {
+            eprintln!(
+                "{} {} {:?} {} {} {} {}",
+                a.resource_type,
+                a.resource_name,
+                a.pattern_type,
+                a.principal,
+                a.host,
+                a.operation,
+                a.permission
+            );
+        }
+        assert!(
+            acls.iter()
+                .any(|a| a.principal == "User:admin" && a.resource_name == "users.events"),
+            "expected DENY ACL on users.events for User:admin"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires local Kafka: docker compose up -d"]
     fn fetch_messages_from_local_orders() {
         let cluster = ClusterConfig {
             brokers: vec!["localhost:9092".into()],
-            auth: AuthConfig::None,
+            auth: AuthConfig::SaslPlain {
+                username: "admin".into(),
+                password: "admin-secret".into(),
+                tls: false,
+            },
             client_id: Some("y2kexplorer-test".into()),
+            schema_registry: None,
+            kafka_connect: None,
         };
         let conn = ClusterConnection::connect(&cluster).expect("connect");
         let msgs = conn

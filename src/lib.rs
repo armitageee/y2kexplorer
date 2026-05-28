@@ -4,4 +4,6 @@
 
 pub mod config;
 pub mod kafka;
+pub mod kafka_connect;
 pub mod labels;
+pub mod schema_registry;

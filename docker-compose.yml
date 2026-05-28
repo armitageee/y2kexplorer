@@ -1,11 +1,22 @@
-# Локальный Kafka (KRaft, без Zookeeper) для проверки y2kexplorer.
+# Локальный Kafka (KRaft) с SASL/PLAIN и ACL для проверки y2kexplorer.
 #
 #   docker compose up -d
 #   docker compose logs -f kafka-init   # дождаться "done"
-#   cargo run --release
+#   cargo run --release -- --cluster local
 #
-# Брокер с хоста: localhost:9092 (см. config.example.toml)
-# Kafka UI:       http://localhost:8080
+# Учётные записи (SASL/PLAIN):
+#   admin / admin-secret  — super user (ACL, topics, всё)
+#   app   / app-secret    — ограниченный (sample ACL: Read+Describe на orders)
+#
+# С хоста:  localhost:9092  (SASL_PLAINTEXT)
+# Schema Registry: http://localhost:8081
+# Kafka Connect REST: http://localhost:8083
+# Kafka UI: http://localhost:8080
+#
+# Connect demo pipeline (after all services are up):
+#   events-generator -> /data/events.json
+#   file-source      -> topic connect.events
+#   file-sink        -> /data/sink.json  (host: docker/connect-data/sink.json)
 
 services:
   kafka:
@@ -14,14 +25,16 @@ services:
     container_name: y2k-kafka
     ports:
       - "9092:9092"
+    volumes:
+      - ./docker/sasl:/etc/kafka/secrets:ro
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      # EXTERNAL — с хоста (y2k); INTERNAL — из docker-сети (kafka-init)
+      # EXTERNAL — с хоста (y2k); INTERNAL — из docker-сети (kafka-init, kafka-ui)
       KAFKA_LISTENERS: EXTERNAL://:9092,INTERNAL://:29092,CONTROLLER://:9093
       KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka:29092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:SASL_PLAINTEXT,INTERNAL:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -29,16 +42,26 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # SASL/PLAIN (см. docker/sasl/broker_jaas.conf)
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/secrets/broker_jaas.conf
+      # ACL (KRaft StandardAuthorizer)
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      # User:ANONYMOUS — только CONTROLLER/внутренний PLAINTEXT (KRaft registration).
+      # Клиенты с хоста — SASL/PLAIN (admin или app), ACL применяются к ним.
+      KAFKA_SUPER_USERS: User:admin;User:ANONYMOUS
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1",
+          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /etc/kafka/secrets/admin.properties >/dev/null 2>&1",
         ]
       interval: 5s
       timeout: 10s
       retries: 12
-      start_period: 25s
+      start_period: 35s
 
   kafka-init:
     image: apache/kafka:3.9.0
@@ -48,10 +71,53 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP: kafka:29092
+      KAFKA_COMMAND_CONFIG: /etc/kafka/secrets/admin.properties
     volumes:
       - ./docker/init-kafka.sh:/init-kafka.sh:ro
       - ./docker/sample-messages:/sample-messages:ro
+      - ./docker/sasl:/etc/kafka/secrets:ro
     entrypoint: ["/bin/bash", "/init-kafka.sh"]
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.7.1
+    hostname: schema-registry
+    container_name: y2k-schema-registry
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: PLAIN
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret";
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf http://localhost:8081/subjects >/dev/null || exit 1",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  schema-init:
+    image: curlimages/curl:8.11.1
+    container_name: y2k-schema-init
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      SCHEMAS_DIR: /schemas
+    volumes:
+      - ./docker/init-schemas.sh:/init-schemas.sh:ro
+      - ./docker/schemas:/schemas:ro
+    entrypoint: ["/bin/sh", "/init-schemas.sh"]
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -62,6 +128,86 @@ services:
       DYNAMIC_CONFIG_ENABLED: "true"
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: PLAIN
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret";
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
     depends_on:
       kafka:
         condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+
+  events-generator:
+    image: alpine:3.21
+    container_name: y2k-events-generator
+    volumes:
+      - ./docker/connect-data:/data
+      - ./docker/connect/generate-events.sh:/generate-events.sh:ro
+    entrypoint: ["/bin/sh", "/generate-events.sh"]
+
+  kafka-connect:
+    build:
+      context: ./docker/connect
+      dockerfile: Dockerfile
+    image: y2k-kafka-connect:7.7.1
+    hostname: kafka-connect
+    container_name: y2k-kafka-connect
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./docker/connect-data:/data
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka:29092
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: y2k-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+      CONNECT_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_SASL_MECHANISM: PLAIN
+      CONNECT_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret";
+      CONNECT_PRODUCER_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_PRODUCER_SASL_MECHANISM: PLAIN
+      CONNECT_PRODUCER_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret";
+      CONNECT_CONSUMER_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_CONSUMER_SASL_MECHANISM: PLAIN
+      CONNECT_CONSUMER_SASL_JAAS_CONFIG: org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret";
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf http://localhost:8083/ >/dev/null || exit 1",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+      start_period: 60s
+
+  connect-init:
+    image: curlimages/curl:8.11.1
+    container_name: y2k-connect-init
+    environment:
+      CONNECT_URL: http://kafka-connect:8083
+      CONFIGS_DIR: /connectors
+    volumes:
+      - ./docker/connect/init-connect.sh:/init-connect.sh:ro
+      - ./docker/connect:/connectors:ro
+    entrypoint: ["/bin/sh", "/init-connect.sh"]
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+      events-generator:
+        condition: service_started

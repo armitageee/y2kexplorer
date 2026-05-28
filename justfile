@@ -79,7 +79,7 @@ test-all:
 
 # ---------- docker test cluster ----------
 
-# bring up local Kafka + Kafka-UI (PLAINTEXT, no auth, seeded sample topics)
+# bring up local Kafka + Kafka-UI (SASL/PLAIN, ACL, seeded sample topics)
 up:
     docker compose up -d
     @echo "waiting for kafka-init to seed topics…"

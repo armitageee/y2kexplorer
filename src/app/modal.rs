@@ -3,6 +3,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::kafka::AclSpec;
 use crate::ui::theme;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +11,17 @@ pub enum ModalField {
     First,
     Second,
     Third,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AclFormField {
+    ResourceType,
+    ResourceName,
+    PatternType,
+    Principal,
+    Host,
+    Operation,
+    Permission,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +65,26 @@ pub enum Modal {
         add: bool,
         topic_count: usize,
     },
+    /// Создать или заменить ACL (`edit` → delete old + create new).
+    AclForm {
+        edit: bool,
+        replace: Option<AclSpec>,
+        resource_type: String,
+        resource_name: String,
+        pattern_type: String,
+        principal: String,
+        host: String,
+        operation: String,
+        permission: String,
+        field: AclFormField,
+    },
+    DeleteAclConfirm {
+        spec: AclSpec,
+        summary: String,
+    },
+    DeleteConnectorConfirm {
+        name: String,
+    },
 }
 
 impl Modal {
@@ -74,6 +106,15 @@ impl Modal {
                     "Remove label"
                 }
             }
+            Modal::AclForm { edit, .. } => {
+                if *edit {
+                    "Edit ACL"
+                } else {
+                    "Create ACL"
+                }
+            }
+            Modal::DeleteAclConfirm { .. } => "Delete ACL",
+            Modal::DeleteConnectorConfirm { .. } => "Delete connector",
         }
     }
 
@@ -89,6 +130,17 @@ impl Modal {
                 *field = match field {
                     ModalField::First => ModalField::Second,
                     _ => ModalField::First,
+                };
+            }
+            Modal::AclForm { field, .. } => {
+                *field = match field {
+                    AclFormField::ResourceType => AclFormField::ResourceName,
+                    AclFormField::ResourceName => AclFormField::PatternType,
+                    AclFormField::PatternType => AclFormField::Principal,
+                    AclFormField::Principal => AclFormField::Host,
+                    AclFormField::Host => AclFormField::Operation,
+                    AclFormField::Operation => AclFormField::Permission,
+                    AclFormField::Permission => AclFormField::ResourceType,
                 };
             }
             _ => {}
@@ -115,12 +167,33 @@ impl Modal {
                 ModalField::First => name.push(c),
                 _ => partitions.push(c),
             },
-            Modal::DeleteConfirm { .. } => {}
+            Modal::DeleteConfirm { .. }
+            | Modal::DeleteAclConfirm { .. }
+            | Modal::DeleteConnectorConfirm { .. } => {}
             Modal::MessageLimit { value } => value.push(c),
             Modal::DeleteGroupConfirm { .. } => {}
             Modal::DeleteLabelConfirm { .. } => {}
             Modal::ResetOffsets { spec, .. } => spec.push(c),
             Modal::TopicLabel { label, .. } => label.push(c),
+            Modal::AclForm {
+                resource_type,
+                resource_name,
+                pattern_type,
+                principal,
+                host,
+                operation,
+                permission,
+                field,
+                ..
+            } => match field {
+                AclFormField::ResourceType => resource_type.push(c),
+                AclFormField::ResourceName => resource_name.push(c),
+                AclFormField::PatternType => pattern_type.push(c),
+                AclFormField::Principal => principal.push(c),
+                AclFormField::Host => host.push(c),
+                AclFormField::Operation => operation.push(c),
+                AclFormField::Permission => permission.push(c),
+            },
         }
     }
 
@@ -152,7 +225,9 @@ impl Modal {
                     partitions.pop();
                 }
             },
-            Modal::DeleteConfirm { .. } => {}
+            Modal::DeleteConfirm { .. }
+            | Modal::DeleteAclConfirm { .. }
+            | Modal::DeleteConnectorConfirm { .. } => {}
             Modal::MessageLimit { value } => {
                 value.pop();
             }
@@ -164,6 +239,39 @@ impl Modal {
             Modal::TopicLabel { label, .. } => {
                 label.pop();
             }
+            Modal::AclForm {
+                resource_type,
+                resource_name,
+                pattern_type,
+                principal,
+                host,
+                operation,
+                permission,
+                field,
+                ..
+            } => match field {
+                AclFormField::ResourceType => {
+                    resource_type.pop();
+                }
+                AclFormField::ResourceName => {
+                    resource_name.pop();
+                }
+                AclFormField::PatternType => {
+                    pattern_type.pop();
+                }
+                AclFormField::Principal => {
+                    principal.pop();
+                }
+                AclFormField::Host => {
+                    host.pop();
+                }
+                AclFormField::Operation => {
+                    operation.pop();
+                }
+                AclFormField::Permission => {
+                    permission.pop();
+                }
+            },
         }
     }
 
@@ -173,6 +281,8 @@ impl Modal {
             Modal::DeleteConfirm { .. }
                 | Modal::DeleteGroupConfirm { .. }
                 | Modal::DeleteLabelConfirm { .. }
+                | Modal::DeleteAclConfirm { .. }
+                | Modal::DeleteConnectorConfirm { .. }
         ) && matches!(c, 'y' | 'Y')
     }
 }
@@ -182,7 +292,10 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
     let popup_h = match modal {
         Modal::DeleteConfirm { .. }
         | Modal::DeleteGroupConfirm { .. }
-        | Modal::DeleteLabelConfirm { .. } => 7,
+        | Modal::DeleteLabelConfirm { .. }
+        | Modal::DeleteAclConfirm { .. }
+        | Modal::DeleteConnectorConfirm { .. } => 7,
+        Modal::AclForm { .. } => 14,
         Modal::Produce { .. } => 11,
         Modal::CreateTopic { .. } => 9,
         Modal::ResetOffsets { .. } => 9,
@@ -343,6 +456,84 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
                 )),
             ]
         }
+        Modal::AclForm {
+            edit,
+            resource_type,
+            resource_name,
+            pattern_type,
+            principal,
+            host,
+            operation,
+            permission,
+            field,
+            ..
+        } => {
+            let mut out = vec![Line::from(Span::styled(
+                if *edit {
+                    "replaces selected ACL (delete + create)"
+                } else {
+                    "topic|group|broker|cluster|transactional_id"
+                },
+                theme::footer_hint(),
+            ))];
+            out.push(acl_field_line(
+                "type",
+                resource_type,
+                *field == AclFormField::ResourceType,
+            ));
+            out.push(acl_field_line(
+                "resource",
+                resource_name,
+                *field == AclFormField::ResourceName,
+            ));
+            out.push(acl_field_line(
+                "pattern",
+                pattern_type,
+                *field == AclFormField::PatternType,
+            ));
+            out.push(acl_field_line(
+                "principal",
+                principal,
+                *field == AclFormField::Principal,
+            ));
+            out.push(acl_field_line("host", host, *field == AclFormField::Host));
+            out.push(acl_field_line(
+                "operation",
+                operation,
+                *field == AclFormField::Operation,
+            ));
+            out.push(acl_field_line(
+                "permission",
+                permission,
+                *field == AclFormField::Permission,
+            ));
+            out.push(Line::from(""));
+            out.push(Line::from(Span::styled(
+                "Tab next · Enter save · Esc cancel",
+                theme::footer_hint(),
+            )));
+            out
+        }
+        Modal::DeleteAclConfirm { summary, .. } => vec![
+            Line::from(Span::styled("Delete this ACL?", theme::error())),
+            Line::from(Span::styled(summary.as_str(), theme::value())),
+            Line::from(""),
+            Line::from(Span::styled(
+                "y confirm · n/Esc cancel",
+                theme::footer_hint(),
+            )),
+        ],
+        Modal::DeleteConnectorConfirm { name } => vec![
+            Line::from(Span::styled(
+                format!("Delete connector \"{name}\"?"),
+                theme::error(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "y confirm · n/Esc cancel",
+                theme::footer_hint(),
+            )),
+        ],
     };
 
     let widget = Paragraph::new(lines)
@@ -350,6 +541,10 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
         .wrap(Wrap { trim: false })
         .alignment(Alignment::Left);
     frame.render_widget(widget, popup);
+}
+
+fn acl_field_line(label: &str, value: &str, active: bool) -> Line<'static> {
+    field_line(label, value, active)
 }
 
 fn field_line(label: &str, value: &str, active: bool) -> Line<'static> {

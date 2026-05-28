@@ -59,6 +59,9 @@ impl App {
             "groups" | "g" => self.open_groups(),
             "labels" => self.switch_nav(crate::views::Screen::Labels),
             "contexts" => self.switch_nav(crate::views::Screen::Contexts),
+            "acls" | "acl" => self.switch_nav(crate::views::Screen::Acls),
+            "schemas" | "schema" | "sr" => self.switch_nav(crate::views::Screen::Schemas),
+            "connect" | "connectors" => self.switch_nav(crate::views::Screen::Connectors),
             "label-delete" | "label-rm" => {
                 if let Some(name) = parts.next() {
                     self.run_delete_label(name.to_string());
@@ -94,7 +97,7 @@ impl App {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "?".into());
                 self.status = format!(
-                    "config: {cfg}  |  :context  :contexts  :groups  :labels  :label  :label-delete  :limit  :poll  :help"
+                    "config: {cfg}  |  :context  :contexts  :groups  :labels  :acls  :schemas  :connect  :label  :label-delete  :limit  :poll  :help"
                 );
             }
             _ => {

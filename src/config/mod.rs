@@ -78,6 +78,39 @@ pub struct ClusterConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub client_id: Option<String>,
+    /// Confluent-compatible Schema Registry (опционально).
+    #[serde(default)]
+    pub schema_registry: Option<SchemaRegistryConfig>,
+    /// Kafka Connect REST API (опционально).
+    #[serde(default)]
+    pub kafka_connect: Option<KafkaConnectConfig>,
+}
+
+/// REST API Kafka Connect worker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KafkaConnectConfig {
+    /// Базовый URL, напр. `http://localhost:8083`
+    pub url: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub tls: bool,
+}
+
+/// REST API Schema Registry (Confluent, Karapace, Apicurio v2 API).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaRegistryConfig {
+    /// Базовый URL, напр. `http://localhost:8081`
+    pub url: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    /// HTTPS (для `https://` URL обычно `true`).
+    #[serde(default)]
+    pub tls: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -310,6 +343,8 @@ impl AppConfig {
                 brokers: vec!["localhost:9092".into()],
                 auth: AuthConfig::None,
                 client_id: Some("y2kexplorer".into()),
+                schema_registry: None,
+                kafka_connect: None,
             },
         );
         Self {

@@ -23,8 +23,30 @@ watermark_parallelism = 16
 brokers = ["localhost:9092"]
 client_id = "y2kexplorer"
 
+# Локальный docker compose: SASL/PLAIN + StandardAuthorizer (см. docker-compose.yml).
 [clusters.local.auth]
-type = "none"
+type = "sasl_plain"
+username = "admin"
+password = "admin-secret"
+tls = false
+
+# Ограниченный пользователь (sample ACL: Read+Describe на orders):
+# username = "app"
+# password = "app-secret"
+
+# Schema Registry (docker compose: http://localhost:8081)
+[clusters.local.schema_registry]
+url = "http://localhost:8081"
+# username = "sr-user"
+# password = "sr-secret"
+# tls = false
+
+# Kafka Connect REST (docker compose: http://localhost:8083)
+[clusters.local.kafka_connect]
+url = "http://localhost:8083"
+# username = "connect-user"
+# password = "connect-secret"
+# tls = false
 
 # --- SASL/PLAIN (over TLS) ---
 # [clusters.staging]

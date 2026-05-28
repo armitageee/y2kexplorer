@@ -7,7 +7,9 @@ mod views;
 
 pub use y2kexplorer::config;
 pub use y2kexplorer::kafka;
+pub use y2kexplorer::kafka_connect;
 pub use y2kexplorer::labels;
+pub use y2kexplorer::schema_registry;
 
 use std::path::PathBuf;
 use std::sync::mpsc;

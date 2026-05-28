@@ -165,7 +165,7 @@ impl MessagesView {
         }
     }
 
-    /// Добавить новые сообщения (live), убрать дубликаты, обрезать буфер с начала.
+    /// Добавить новые сообщения (live), убрать дубликаты, обрезать хвост буфера.
     pub fn append_live(
         &mut self,
         new: Vec<FetchedMessage>,
@@ -183,14 +183,12 @@ impl MessagesView {
             .dedup_by(|a, b| a.partition == b.partition && a.offset == b.offset);
         sort_messages_in_place(&mut self.messages, single_partition, sort_by_time);
         if self.messages.len() > limit {
-            let drop = self.messages.len() - limit;
-            self.messages.drain(0..drop);
+            self.messages.truncate(limit);
         }
         self.sync_next_offsets();
         let added = self.messages.len().saturating_sub(before);
         if !self.messages.is_empty() {
-            self.list_state
-                .select(Some(self.messages.len().saturating_sub(1)));
+            self.list_state.select(Some(0));
         }
         self.detail_scroll = 0;
         added
@@ -220,10 +218,7 @@ impl MessagesView {
     pub fn load(&mut self, messages: Vec<FetchedMessage>) {
         self.messages = messages;
         self.sync_next_offsets();
-        if self.live && !self.messages.is_empty() {
-            self.list_state
-                .select(Some(self.messages.len().saturating_sub(1)));
-        } else if !self.messages.is_empty() {
+        if !self.messages.is_empty() {
             self.list_state.select(Some(0));
         }
     }
@@ -403,16 +398,16 @@ fn sort_messages_in_place(
     sort_by_time: bool,
 ) {
     if single_partition {
-        messages.sort_by_key(|a| a.offset);
+        messages.sort_by_key(|m| std::cmp::Reverse(m.offset));
     } else if sort_by_time {
         messages.sort_by(|a, b| match (a.timestamp_ms, b.timestamp_ms) {
-            (Some(ta), Some(tb)) => ta.cmp(&tb),
+            (Some(ta), Some(tb)) => tb.cmp(&ta),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
+            (None, None) => (b.partition, b.offset).cmp(&(a.partition, a.offset)),
         });
     } else {
-        messages.sort_by_key(|a| (a.partition, a.offset));
+        messages.sort_by_key(|m| std::cmp::Reverse((m.partition, m.offset)));
     }
 }
 

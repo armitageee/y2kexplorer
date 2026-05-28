@@ -1,15 +1,25 @@
+mod acls;
+mod connector_detail;
+mod connectors;
 mod context_list;
 mod group_details;
 mod groups;
 mod label_list;
 mod messages;
+mod schema_detail;
+mod schemas;
 mod stack;
 mod topics;
 
+pub use acls::AclsView;
+pub use connector_detail::ConnectorDetailView;
+pub use connectors::ConnectorsView;
 pub use context_list::ContextListView;
 pub use group_details::GroupDetailsView;
 pub use groups::GroupsView;
 pub use label_list::LabelListView;
 pub use messages::MessagesView;
+pub use schema_detail::SchemaDetailView;
+pub use schemas::SchemasView;
 pub use stack::{Screen, ViewStack};
 pub use topics::TopicsView;
