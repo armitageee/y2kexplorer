@@ -412,14 +412,14 @@ fn mono_theme() -> Theme {
 fn latte_theme() -> Theme {
     from_colors(
         Colors {
-            fg: Color::Indexed(239),    // text #4c4f69
-            muted: Color::Indexed(244), // overlay0 #9ca0b0
-            accent: Color::Indexed(135), // mauve #8839ef
-            accent2: Color::Indexed(31), // sapphire #209fb5
-            accent3: Color::Indexed(30), // teal #179299
-            error: Color::Indexed(160), // red #d20f39
-            success: Color::Indexed(28), // green #40a02b
-            input_bg: Color::Indexed(255), // base #eff1f5
+            fg: Color::Indexed(239),        // text #4c4f69
+            muted: Color::Indexed(244),     // overlay0 #9ca0b0
+            accent: Color::Indexed(135),    // mauve #8839ef
+            accent2: Color::Indexed(31),    // sapphire #209fb5
+            accent3: Color::Indexed(30),    // teal #179299
+            error: Color::Indexed(160),     // red #d20f39
+            success: Color::Indexed(28),    // green #40a02b
+            input_bg: Color::Indexed(255),  // base #eff1f5
             marked_bg: Color::Indexed(251), // surface0 #ccd0da
         },
         FOOTER_LIGHT,
