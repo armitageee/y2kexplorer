@@ -754,16 +754,16 @@ fn message_to_fetched<M: Message>(m: &M) -> FetchedMessage {
 
 fn sort_fetched(out: &mut [FetchedMessage], single_partition: bool, sort_by_time: bool) {
     if single_partition {
-        out.sort_by_key(|m| m.offset);
+        out.sort_by_key(|m| std::cmp::Reverse(m.offset));
     } else if sort_by_time {
         out.sort_by(|a, b| match (a.timestamp_ms, b.timestamp_ms) {
-            (Some(ta), Some(tb)) => ta.cmp(&tb),
+            (Some(ta), Some(tb)) => tb.cmp(&ta),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => (a.partition, a.offset).cmp(&(b.partition, b.offset)),
+            (None, None) => (b.partition, b.offset).cmp(&(a.partition, a.offset)),
         });
     } else {
-        out.sort_by_key(|m| (m.partition, m.offset));
+        out.sort_by_key(|m| std::cmp::Reverse((m.partition, m.offset)));
     }
 }
 
