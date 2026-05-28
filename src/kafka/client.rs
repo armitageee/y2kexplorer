@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -274,6 +275,28 @@ impl ClusterConnection {
         from_end: bool,
         sort_by_time: bool,
     ) -> Result<Vec<FetchedMessage>> {
+        self.fetch_messages_with_progress(
+            topic,
+            partition,
+            limit,
+            from_end,
+            sort_by_time,
+            |_d, _t| {},
+        )
+    }
+
+    pub fn fetch_messages_with_progress<F>(
+        &self,
+        topic: &str,
+        partition: Option<i32>,
+        limit: usize,
+        from_end: bool,
+        sort_by_time: bool,
+        mut on_progress: F,
+    ) -> Result<Vec<FetchedMessage>>
+    where
+        F: FnMut(usize, usize),
+    {
         let consumer: BaseConsumer = consumer_config(&self.cluster, "y2kexplorer")
             .create()
             .context("create kafka consumer")?;
@@ -299,50 +322,53 @@ impl ClusterConnection {
 
         let multi_partition = partition_ids.len() > 1;
         let per_partition = (limit / partition_ids.len()).max(1);
-        let timeout = Timeout::After(Duration::from_secs(5));
+        let total_parts = partition_ids.len();
+        let workers = total_parts.min(8);
+        let chunk_size = total_parts.div_ceil(workers).max(1);
+        let topic = topic.to_string();
+        let cluster = self.cluster.clone();
+        let (tx, rx) = mpsc::channel();
+
+        thread::scope(|scope| {
+            for chunk in partition_ids.chunks(chunk_size) {
+                let tx = tx.clone();
+                let cluster = cluster.clone();
+                let topic = topic.clone();
+                let chunk = chunk.to_vec();
+                scope.spawn(move || {
+                    let consumer: BaseConsumer =
+                        match consumer_config(&cluster, "y2kexplorer-fetch").create() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                let err = anyhow::anyhow!("create kafka consumer: {e}");
+                                for part in chunk {
+                                    let _ = tx.send((part, Err(anyhow::anyhow!("{err}"))));
+                                }
+                                return;
+                            }
+                        };
+                    for part_id in chunk {
+                        let res = fetch_partition_messages(
+                            &consumer,
+                            &topic,
+                            part_id,
+                            per_partition,
+                            from_end,
+                        );
+                        let _ = tx.send((part_id, res));
+                    }
+                });
+            }
+        });
+        drop(tx);
+
         let mut out = Vec::with_capacity(limit);
-
-        for part_id in partition_ids {
-            if out.len() >= limit {
-                break;
-            }
-            let (low, high) = consumer.fetch_watermarks(topic, part_id, timeout)?;
-            // high — следующий offset для записи; сообщения лежат в [low, high)
-            if high <= low {
-                continue;
-            }
-
-            let available = (high - low) as usize;
-            let want = per_partition.min(available).min(limit - out.len());
-            let start = if from_end {
-                (high - want as i64).max(low)
-            } else {
-                low
-            };
-
-            let mut tpl = TopicPartitionList::new();
-            tpl.add_partition_offset(topic, part_id, Offset::Offset(start))?;
-            consumer.assign(&tpl)?;
-
-            let mut got = 0;
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            while got < want && out.len() < limit && std::time::Instant::now() < deadline {
-                match consumer.poll(Duration::from_millis(300)) {
-                    None => continue,
-                    Some(Err(e)) => {
-                        if e.rdkafka_error_code() == Some(RDKafkaErrorCode::PartitionEOF) {
-                            break;
-                        }
-                        return Err(e.into());
-                    }
-                    Some(Ok(m)) => {
-                        if m.offset() < low || m.offset() >= high {
-                            break;
-                        }
-                        got += 1;
-                        out.push(message_to_fetched(&m));
-                    }
-                }
+        for done in 1..=total_parts {
+            let (_, part_result) = rx.recv().context("messages worker channel closed")?;
+            on_progress(done, total_parts);
+            match part_result {
+                Ok(mut part_msgs) => out.append(&mut part_msgs),
+                Err(e) => return Err(e),
             }
         }
 
@@ -750,6 +776,60 @@ fn message_to_fetched<M: Message>(m: &M) -> FetchedMessage {
         payload: m.payload().map(|p| String::from_utf8_lossy(p).into_owned()),
         headers: message_headers(m),
     }
+}
+
+fn fetch_partition_messages(
+    consumer: &BaseConsumer,
+    topic: &str,
+    part_id: i32,
+    per_partition: usize,
+    from_end: bool,
+) -> Result<Vec<FetchedMessage>> {
+    let timeout = Timeout::After(Duration::from_secs(5));
+    let (low, high) = consumer.fetch_watermarks(topic, part_id, timeout)?;
+    // high — следующий offset для записи; сообщения лежат в [low, high)
+    if high <= low {
+        return Ok(Vec::new());
+    }
+
+    let available = (high - low) as usize;
+    let want = per_partition.min(available);
+    if want == 0 {
+        return Ok(Vec::new());
+    }
+    let start = if from_end {
+        (high - want as i64).max(low)
+    } else {
+        low
+    };
+
+    let mut tpl = TopicPartitionList::new();
+    tpl.add_partition_offset(topic, part_id, Offset::Offset(start))?;
+    consumer.assign(&tpl)?;
+
+    let mut out = Vec::with_capacity(want);
+    let mut got = 0;
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    while got < want && std::time::Instant::now() < deadline {
+        match consumer.poll(Duration::from_millis(250)) {
+            None => continue,
+            Some(Err(e)) => {
+                if e.rdkafka_error_code() == Some(RDKafkaErrorCode::PartitionEOF) {
+                    break;
+                }
+                return Err(e.into());
+            }
+            Some(Ok(m)) => {
+                if m.offset() < low || m.offset() >= high {
+                    break;
+                }
+                got += 1;
+                out.push(message_to_fetched(&m));
+            }
+        }
+    }
+
+    Ok(out)
 }
 
 fn sort_fetched(out: &mut [FetchedMessage], single_partition: bool, sort_by_time: bool) {
