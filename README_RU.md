@@ -13,401 +13,77 @@
   <a href="README.md">English version</a>
 </p>
 
-Клавиатурный дашборд для Apache Kafka — по духу близко к
-[k9s](https://github.com/derailed/k9s), но на Rust + [ratatui](https://docs.rs/ratatui).
-Интерфейс — аккуратная multi-panel вёрстка в духе
-[eilmeldung](https://github.com/christo-auer/eilmeldung): скруглённые рамки, приглушённые
-панели, выделение через инверсию, компактный status bar.
+y2kexplorer — клавиатурный TUI для исследования и повседневной работы с кластером Apache Kafka.
+По духу это альтернатива [k9s](https://github.com/derailed/k9s), [AKHQ](https://akhq.io/) или [Redpanda Console](https://www.redpanda.com/redpanda-console-kafka-ui) — но на Rust + [ratatui](https://docs.rs/ratatui) с аккуратной multi-panel вёрсткой в духе [eilmeldung](https://github.com/christo-auer/eilmeldung).
 
-[![asciicast](https://asciinema.org/a/mtFnSVROdvCeQkC7.svg)](https://asciinema.org/a/mtFnSVROdvCeQkC7)
+Возможности:
 
-## Возможности
+- **Topics** — список с фильтром, метаданные партиций, опциональный подсчёт сообщений.
+- **Messages** — head / tail, выбор партиции, сортировка по времени, live-follow, pretty-print JSON.
+- **Produce** и **создание / удаление топиков**.
+- **Consumer groups** — список, lag, reset offsets, удаление пустых групп.
+- **Schema Registry** — subjects, версии, просмотр Avro/JSON-схем.
+- **Kafka Connect** — коннекторы, статус, pause / resume / restart / delete.
+- **ACL**, локальные **лейблы топиков**, переключение **нескольких кластеров** в TUI.
+- **Аутентификация** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, Kerberos (GSSAPI) через keytab.
+- Четыре **темы UI** под тёмный или светлый терминал — переключение в TUI клавишей `T`.
 
-- **Topics** — список с фильтром (`/`), колонки partitions / replication / messages
-- **Messages** — head / tail, лимит, выбор партиции, сортировка по времени, live-follow
-- **Produce** — отправка key + payload (`n`)
-- **Создание / удаление топиков** (`c` / `d`)
-- **Consumer groups** — список, состояние, members, lag по партициям (`g` / `:groups`)
-- **Reset offsets** — `earliest` / `latest` / `offset:N` / `timestamp:UNIX_MS` (`R`)
-- **Удаление пустых групп** (`d` на Groups)
-- **Schema Registry** — список subjects, версии, просмотр Avro/JSON-схем (`6` / `:schemas`)
-- **Kafka Connect** — коннекторы, статус/tasks, конфиг; pause / resume / restart / delete (`7` / `:connect`)
-- **Мульти-кластерный конфиг** — переключение в TUI (`:context <name>`)
-- **Аутентификация** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) через keytab**
-- **Темы UI** — четыре палитры (одна для тёмного терминала, три для светлого); переключение в TUI клавишей `T`
+<p align="center">
+  <img src=".assets/demo-y2k-big.gif" width="900" alt="Демо y2kexplorer">
+</p>
 
-## Темы интерфейса
+## Ограничения
 
-Четыре цветовые палитры под **тёмный** или **светлый** фон терминала. Задаются при
-старте (`--theme` или `defaults.theme` в конфиге) или переключаются в TUI клавишей **`T`**
-(текущая тема отображается в status bar).
+- Инструмент для повседневного исследования и лёгких операций — не полная замена админки кластера.
+- Avro-схемы читаются из Schema Registry по HTTP; встроенного SR-клиента сверх browse нет.
+- Большие списки топиков могут грузиться долго при включённом подсчёте сообщений (см. [конфигурацию](docs/ru/configuration.md#производительность-списка-топиков)).
+- Готовые Linux-бинарники рассчитаны на glibc 2.35+ (Ubuntu 22.04+); на более старых дистрибутивах — сборка из исходников.
 
-| Имя | Фон терминала | Характер |
-|---|---|---|
-| `midnight` (по умолчанию) | тёмный | magenta / blue — близко к дефолту eilmeldung |
-| `cream` | светлый | тёплые amber / brown |
-| `mono` | светлый | монохром, высокий контраст на белом фоне, без ярких цветов |
-| `latte` | светлый | [Catppuccin Latte](https://catppuccin.com/palette/) — приглушённые pastel |
-
-**Алиасы** (совместимость): `dark` → `midnight`, `light` → `mono`, `paper` → `mono`, `slate` → `midnight`.
-
-```bash
-y2k --theme mono
-y2k --theme latte
-```
-
-```toml
-[defaults]
-theme = "midnight"   # midnight | cream | mono | latte
-```
-
-**Строка подсказок внизу:** на узком терминале переносится на несколько строк; если всё
-равно не влезает — суффикс `… +N` (сколько подсказок скрыто). Полный список — **`?`**
-(до четырёх строк на высоком окне).
-
-## Установка
-
-### Готовые бинарники (рекомендуется)
-
-Каждый тег `v*` собирает self-contained тарбол под две платформы.
-
-#### macOS (Apple Silicon, arm64)
-
-```bash
-TAG=v0.0.2-rc        # подставить актуальный тег из Releases
-VER=${TAG#v}
-curl -LO "https://github.com/armitageee/y2kexplorer/releases/download/${TAG}/y2kexplorer-${VER}-aarch64-apple-darwin.tar.gz"
-tar -xzf "y2kexplorer-${VER}-aarch64-apple-darwin.tar.gz"
-cd "y2kexplorer-${VER}-aarch64-apple-darwin"
-
-# снять Gatekeeper-карантин, если архив скачан через браузер
-xattr -dr com.apple.quarantine .
-
-./y2k --help
-```
-
-Все нужные `.dylib` (`libsasl2`, `libssl`, `libcrypto`, `libkrb5`, `libcurl`, …) лежат в `lib/`
-рядом с бинарником и подгружаются через `@executable_path/lib/...` (через `dylibbundler`).
-`brew install cyrus-sasl krb5 openssl@3` **не требуется**.
-
-> Если выскочит `library load disallowed by system policy` — значит, в этом релизе CI-подпись
-> не доехала до dylib. Подписать ad-hoc локально:
-> ```bash
-> codesign --force --sign - lib/*.dylib
-> codesign --force --sign - y2k y2k-probe
-> ```
-
-#### Linux (x86_64)
-
-Собран на Ubuntu 22.04 (glibc 2.35); совместим с **Ubuntu 22.04+**, **Debian 12+**,
-**RHEL/Rocky/Alma 9+**, **Fedora 36+**, **openSUSE Leap 15.5+**, Arch.
-
-```bash
-# 1. системные библиотеки (один раз)
-sudo apt install libsasl2-2 libssl3 libkrb5-3 libcurl4         # Debian/Ubuntu
-# или
-sudo dnf install cyrus-sasl-lib openssl-libs krb5-libs libcurl  # Fedora/RHEL
-
-# 2. скачать и запустить
-TAG=v0.0.2-rc
-VER=${TAG#v}
-curl -LO "https://github.com/armitageee/y2kexplorer/releases/download/${TAG}/y2kexplorer-${VER}-x86_64-unknown-linux-gnu.tar.gz"
-tar -xzf "y2kexplorer-${VER}-x86_64-unknown-linux-gnu.tar.gz"
-cd "y2kexplorer-${VER}-x86_64-unknown-linux-gnu"
-./y2k --help
-```
-
-> Не запустится на Ubuntu 20.04 / Debian 11 / RHEL 8 / Alpine (старая glibc или musl) —
-> для таких систем собирайте из исходников.
-
-### Сборка из исходников
-
-Требуется Rust 1.75+, CMake, pkg-config, OpenSSL, Cyrus SASL, MIT Kerberos и libcurl:
-
-```bash
-# macOS
-brew install cmake pkg-config openssl@3 cyrus-sasl krb5
-
-# Debian/Ubuntu
-sudo apt install cmake pkg-config libsasl2-dev libssl-dev libkrb5-dev libcurl4-openssl-dev
-```
-
-Затем:
-
-```bash
-git clone https://github.com/armitageee/y2kexplorer.git
-cd y2kexplorer
-cargo build --release --bin y2k --bin y2k-probe --all-features
-./target/release/y2k --help
-```
-
-Если установлен [`just`](https://github.com/casey/just) — `just build` делает то же самое.
-
-## Конфигурация
-
-Путь по умолчанию: `~/.config/y2kexplorer/config.toml`.
+## Быстрый старт
 
 ```bash
 mkdir -p ~/.config/y2kexplorer
 cp config.example.toml ~/.config/y2kexplorer/config.toml
 $EDITOR ~/.config/y2kexplorer/config.toml
-```
 
-Запуск:
-
-```bash
-y2k                            # дефолтный кластер из defaults.cluster
-y2k --cluster <name>           # кластер из [clusters.<name>]
-y2k --config /path/to.toml     # кастомный путь к конфигу
-y2k --theme mono              # тема UI (см. раздел «Темы интерфейса»)
+y2k                            # дефолтный кластер из конфига
+y2k --cluster <name>           # именованный кластер
 y2k-probe --cluster <name>     # smoke-тест подключения без TUI
 ```
 
-См. [Темы интерфейса](#темы-интерфейса): `midnight`, `cream`, `mono`, `latte` и алиасы
-`dark` / `light`.
+Готовые бинарники для **macOS arm64** и **Linux x86_64** — на странице [Releases](https://github.com/armitageee/y2kexplorer/releases).
+Сборка из исходников: `cargo build --release --bin y2k --bin y2k-probe --all-features`.
 
-### Производительность списка топиков
+Подробности: [Установка](docs/ru/installation.md).
 
-Колонка `MESSAGES` в Topics-view считается через high-low watermark per
-partition. На кластерах с большим числом топиков (или высокой broker latency)
-это может занимать большую часть времени загрузки. Регулируется двумя опциями:
+## Попробовать локально
 
-```toml
-[defaults]
-# Не считать message_count вовсе — мгновенная загрузка, колонка MESSAGES = 0.
-fetch_watermarks = true        # дефолт true
-# Сколько потоков параллельно опрашивает watermarks (1..=64).
-watermark_parallelism = 16     # дефолт 16
-```
-
-Реальные замеры (Kerberos+TLS кластер, 84 топика / 720 партиций):
-
-| Режим | Время |
-|---|---|
-| sequential (legacy) | ~103 с |
-| parallel(16) | ~6.4 с |
-| `fetch_watermarks = false` | ~3 с (только metadata) |
-
-Запустить замер на своём кластере: `y2k-probe -c <cluster> --bench-topics`.
-
-### Аутентификация
-
-У каждого кластера своя секция `[clusters.<name>.auth]`:
-
-| `type` | Обязательные поля | Заметки |
-|---|---|---|
-| `none` | — | PLAINTEXT, без auth |
-| `sasl_plain` | `username`, `password`, `tls` | |
-| `sasl_scram` | `username`, `password`, `mechanism` (`SCRAM-SHA-256` / `SCRAM-SHA-512`), `tls` | |
-| `ssl` | `ca_location`, `certificate_location`, `key_location`, `key_password` | mTLS |
-| `kerberos` | `keytab`, `principal`, `service_name`, `tls`, опционально `krb5_conf`, `ssl_ca` | GSSAPI через keytab |
-
-Полные примеры — в [`config.example.toml`](config.example.toml).
-
-## Горячие клавиши
-
-### Глобальные
-
-| Клавиша | Действие |
-|---|---|
-| `j` / `k`, `↑` / `↓` | навигация |
-| `Enter` | открыть выбранное |
-| `Esc` | назад / закрыть модалку |
-| `r` | обновить текущий вид |
-| `:` | команды (`context`, `clusters`, `groups`, `labels`, `acls`, `schemas`, `connect`, `label`, `limit`, `poll`, `help`) |
-| `1` / `2` / `3` / `4` / `5` / `6` / `7` | sidebar: Topics / Groups / Labels / Contexts / ACLs / Schemas / Connect |
-| `?` | краткая / полная справка по клавишам |
-| `T` | смена темы (`midnight` → `cream` → `mono` → `latte`) |
-| `q` | выход |
-
-### Topics
-
-| Клавиша | Действие |
-|---|---|
-| `Space` | отметить / снять отметку (multi-select, как в k9s) |
-| `L` | добавить лейбл к отмеченным (или текущему) топикам |
-| `U` | удалить лейбл |
-| `D` | сбросить все отметки |
-| `/` | текстовый фильтр |
-| `Enter` | открыть messages для топика |
-| `n` | produce — редактор key + payload |
-| `c` | создать топик (с указанием partitions) |
-| `d` | удалить топик (подтверждение `y`) |
-| `p` | popup с метаданными партиций |
-| `g` | Consumer Groups (sidebar `2`) |
-
-### Labels
-
-Локальные теги топиков (в `config.toml`, не в Kafka) — группировка по микросервисам, окружению и т.д.
-
-| Клавиша | Действие |
-|---|---|
-| `Enter` | Topics с фильтром по лейблу |
-| `d` | удалить лейбл со всех топиков кластера (подтверждение `y`) |
-| `/` | фильтр списка лейблов |
-| `1` / `2` / `3` / `4` / `5` / `6` | навигация в sidebar |
-
-```toml
-[topic_labels.lt01]
-"orders" = ["order-service", "prod"]
-```
-
-Команды: `:labels`, `:label billing`, `:label-delete billing` (удалить везде).
-
-### Contexts
-
-Список кластеров из `config.toml` и переключение между ними.
-
-| Клавиша | Действие |
-|---|---|
-| `Enter` | переключиться на кластер (переподключение + Topics) |
-| `/` | фильтр списка |
-| `4` | экран Contexts (sidebar) |
-
-Команды: `:contexts`, `:context <имя>`.
-
-### ACLs
-
-Просмотр и управление ACL Kafka (нужен включённый authorizer и права администратора у вашего principal).
-
-| Клавиша | Действие |
-|---|---|
-| `/` | фильтр списка |
-| `c` | создать ACL |
-| `e` | изменить выбранный ACL (удаление старой записи + создание новой) |
-| `d` | удалить (подтверждение `y`) |
-| `r` | обновить |
-| `5` | экран ACLs (sidebar) |
-
-Команда: `:acls`
-
-Типы ресурсов: `topic`, `group`, `broker`, `cluster` (имя `kafka-cluster`), `transactional_id`. Pattern: `literal`, `prefixed`, `match`. Permission: `allow` / `deny`.
-
-### Schemas (Schema Registry)
-
-Отдельный HTTP-сервис Confluent Schema Registry — не через Kafka API. Для кластера нужна секция `[clusters.<name>.schema_registry]` с `url` (см. [`config.example.toml`](config.example.toml)).
-
-| Клавиша | Действие |
-|---|---|
-| `/` | фильтр по subject |
-| `Enter` | детали схемы (последняя версия) |
-| `j` / `k` | переключение версии в деталях |
-| `u` / `d` | прокрутка JSON схемы |
-| `r` | обновить |
-| `6` | экран Schemas (sidebar) |
-
-Команды: `:schemas`, `:schema <subject>`, `:sr <subject>`
-
-### Connect (Kafka Connect)
-
-Отдельный REST API Kafka Connect. Для кластера — секция `[clusters.<name>.kafka_connect]` с `url` (см. [`config.example.toml`](config.example.toml)).
-
-| Клавиша | Действие |
-|---|---|
-| `/` | фильтр коннекторов |
-| `Enter` | детали (статус, tasks, JSON конфига) |
-| `P` / `O` | pause / resume |
-| `R` | restart |
-| `d` | удалить (подтверждение `y`) |
-| `u` / `PageUp` / `PageDown` | прокрутка конфига |
-| `r` | обновить |
-| `7` | экран Connect (sidebar) |
-
-Команды: `:connect`, `:connectors`
-
-### Messages
-
-| Клавиша | Действие |
-|---|---|
-| `b` / `t` | tail (с конца) / head (с начала) |
-| `p` | цикл партиции (all → 0 → 1 → …) |
-| `i` | popup с метаданными партиций |
-| `s` | сортировка по времени ↔ по offset |
-| `+` / `-` | лимит ±50 (10–10000) |
-| `l` | ввод точного лимита |
-| `f` | live follow — periodic poll новых сообщений |
-| `[` / `]` | интервал live-poll ±1 с (1–30) |
-| `o` | pretty-print JSON on/off |
-| `y` | копировать выбранное сообщение в буфер |
-| `u` / `d` | прокрутка детали |
-| `PgUp` / `PgDn` | прокрутка детали быстрее |
-| `n` | produce |
-
-### Consumer groups
-
-| Клавиша | Действие |
-|---|---|
-| `/` | фильтр по id |
-| `Enter` | детали группы (offsets / lag) |
-| `R` | reset offsets |
-| `d` | удалить группу (только когда state ∈ {`Empty`, `Dead`}) |
-
-`R` открывает модалку с полем **spec**:
-
-| Spec | Что делает |
-|---|---|
-| `earliest` | сдвиг на low watermark всех партиций |
-| `latest` | сдвиг на high watermark (LEO) |
-| `offset:N` | абсолютный N (клампится в `[low, high]` по каждой партиции) |
-| `timestamp:UNIX_MS` | первый offset с `timestamp >= UNIX_MS` (через `offsets_for_times`) |
-
-> **Важно:** reset работает **только когда у группы нет активных consumer-ов**
-> (state ∈ {`Empty`, `Dead`}). Иначе брокер вернёт `REBALANCE_IN_PROGRESS`.
-> y2kexplorer проверяет state до коммита и возвращает понятное сообщение, если группа активна.
-
-## Локальный запуск через Docker
-
-KRaft-кластер с **SASL/PLAIN**, **ACL** (StandardAuthorizer), **Schema Registry** и демо-пайплайном **Kafka Connect**:
-
-| Пользователь | Пароль | Роль |
-|---|---|---|
-| `admin` | `admin-secret` | super user — ACL, все топики |
-| `app` | `app-secret` | ограниченный — sample ACL: Read+Describe на `orders` |
+> [!NOTE]
+> Для встроенного KRaft-стека нужен Docker (SASL/PLAIN, ACL, Schema Registry, демо Kafka Connect).
 
 ```bash
-just up                    # или: docker compose up -d
-just dev                   # или: cargo run --release -- --cluster local
-just down                  # снести
+git clone https://github.com/armitageee/y2kexplorer.git
+cd y2kexplorer
+cp config.example.toml ~/.config/y2kexplorer/config.toml
+
+just up      # или: docker compose up -d
+just dev     # или: cargo run --release -- --cluster local
 ```
 
-Скопируйте `config.example.toml` → `~/.config/y2kexplorer/config.toml` (включая `[clusters.local.schema_registry]` и `[clusters.local.kafka_connect]`). После `docker compose up -d`:
+Подробности: [Локальный Docker-стек](docs/ru/docker.md).
 
-- `schema-init` — Avro-схемы для `orders`, `users.events`, `payments.retry` (`*-value`);
-- `events-generator` — JSON в `docker/connect-data/events.json` каждые ~2 с;
-- `connect-init` — **file-source** (`events.json` → топик `connect.events`) и **file-sink** (`connect.events` → `docker/connect-data/sink.json`).
+## Документация
 
-| Сервис | URL |
+| Раздел | Файл |
 |---|---|
-| Kafka (SASL/PLAIN) | `localhost:9092` |
-| Schema Registry | <http://localhost:8081> |
-| Kafka Connect REST | <http://localhost:8083> |
-| Kafka UI | <http://localhost:8080> (admin) |
+| Установка | [docs/ru/installation.md](docs/ru/installation.md) |
+| Конфигурация и аутентификация | [docs/ru/configuration.md](docs/ru/configuration.md) |
+| Темы интерфейса | [docs/ru/themes.md](docs/ru/themes.md) |
+| Горячие клавиши | [docs/ru/keybindings.md](docs/ru/keybindings.md) |
+| Локальный Docker-стек | [docs/ru/docker.md](docs/ru/docker.md) |
+| Разработка | [docs/ru/development.md](docs/ru/development.md) |
 
-Проверка SR: `curl -s http://localhost:8081/subjects`. В TUI: `6` или `:schemas`.
-
-Проверка Connect: `curl -s http://localhost:8083/connectors`. В TUI: `7` или `:connect`. Пайплайн: `tail -f docker/connect-data/sink.json`.
-
-## Разработка
-
-Если установлен [`just`](https://github.com/casey/just):
-
-```bash
-just                # список задач
-just dev            # cargo run --release
-just ci             # fmt --check + clippy -D warnings + test
-just probe local    # y2k-probe --cluster local
-just release v0.1.0 # тег + push (триггерит Release workflow)
-```
-
-Без `just`:
-
-```bash
-cargo run --release
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features -- --skip fetch_messages_from_local_orders
-cargo build --release --locked --bin y2k --bin y2k-probe --all-features
-```
+Оглавление: [docs/README.ru.md](docs/README.ru.md) · [docs/README.md](docs/README.md) (English).
 
 ## Лицензия
 

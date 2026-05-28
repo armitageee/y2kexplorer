@@ -1488,7 +1488,9 @@ impl App {
     }
 
     pub fn on_worker_msg(&mut self, msg: WorkerMsg) {
-        self.loading = false;
+        if !matches!(msg, WorkerMsg::MessagesProgress { .. }) {
+            self.loading = false;
+        }
         match msg {
             WorkerMsg::Topics(Ok(topics)) => {
                 self.cached_topics = topics.clone();
@@ -1518,6 +1520,23 @@ impl App {
                 }
                 Err(e) => self.status = format!("messages error: {e:#}"),
             },
+            WorkerMsg::MessagesProgress { topic, done, total } => {
+                if let ViewStack::Messages(v) = self.current() {
+                    if v.topic == topic {
+                        let width = 16usize;
+                        let filled = (done * width)
+                            .min(total.saturating_mul(width))
+                            .checked_div(total)
+                            .unwrap_or(0);
+                        let bar = format!(
+                            "{}{}",
+                            "█".repeat(filled),
+                            "░".repeat(width.saturating_sub(filled))
+                        );
+                        self.status = format!("loading {topic} [{bar}] {done}/{total} partitions");
+                    }
+                }
+            }
             WorkerMsg::LiveMessages { topic, result } => {
                 self.live_fetch_in_flight = false;
                 let poll_secs = clamp_live_poll_secs(self.config.defaults.live_poll_secs);

@@ -44,7 +44,7 @@ cd y2kexplorer-__VERSION__-x86_64-unknown-linux-gnu
 ./y2k --help
 ```
 
-> Не работает на Ubuntu 20.04 / Debian 11 / RHEL 8 / Alpine — там старая glibc или musl. Для них можно собрать локально из исходников, см. README.
+> Не работает на Ubuntu 20.04 / Debian 11 / RHEL 8 / Alpine — там старая glibc или musl. Для них можно собрать локально из исходников, см. [docs/ru/installation.md](https://github.com/armitageee/y2kexplorer/blob/main/docs/ru/installation.md).
 
 ### Конфигурация
 
@@ -59,4 +59,4 @@ $EDITOR ~/.config/y2kexplorer/config.toml
 ./y2k-probe --cluster <name>     # smoke-тест подключения без TUI
 ```
 
-Подробности по конфигу, Kerberos-аутентификации, hotkeys — в [README](https://github.com/armitageee/y2kexplorer#readme).
+Подробности по конфигу, Kerberos-аутентификации, hotkeys — в [документации](https://github.com/armitageee/y2kexplorer/tree/main/docs).

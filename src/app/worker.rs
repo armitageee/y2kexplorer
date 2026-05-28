@@ -20,6 +20,11 @@ pub enum WorkerMsg {
         topic: String,
         result: Result<Vec<FetchedMessage>>,
     },
+    MessagesProgress {
+        topic: String,
+        done: usize,
+        total: usize,
+    },
     LiveMessages {
         topic: String,
         result: Result<Vec<FetchedMessage>>,
@@ -88,7 +93,22 @@ pub fn spawn_fetch_messages(
     tx: mpsc::Sender<WorkerMsg>,
 ) {
     thread::spawn(move || {
-        let result = conn.fetch_messages(&topic, partition, limit, from_end, sort_by_time);
+        let progress_topic = topic.clone();
+        let progress_tx = tx.clone();
+        let result = conn.fetch_messages_with_progress(
+            &topic,
+            partition,
+            limit,
+            from_end,
+            sort_by_time,
+            move |done, total| {
+                let _ = progress_tx.send(WorkerMsg::MessagesProgress {
+                    topic: progress_topic.clone(),
+                    done,
+                    total,
+                });
+            },
+        );
         let _ = tx.send(WorkerMsg::Messages { topic, result });
     });
 }
