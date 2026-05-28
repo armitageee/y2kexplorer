@@ -29,7 +29,7 @@ The tool offers the following features:
 - Four **UI themes** for dark or light terminals — switch at runtime with `T`.
 
 <p align="center">
-  <img src=".assets/demo-y2k-large.gif" width="900" alt="y2kexplorer demo">
+  <img src=".assets/demo-y2k-big.gif" width="900" alt="y2kexplorer demo">
 </p>
 
 ## Limitations

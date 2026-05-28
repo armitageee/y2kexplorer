@@ -29,7 +29,7 @@ y2kexplorer — клавиатурный TUI для исследования и 
 - Четыре **темы UI** под тёмный или светлый терминал — переключение в TUI клавишей `T`.
 
 <p align="center">
-  <img src=".assets/demo-y2k-large.gif" width="900" alt="Демо y2kexplorer">
+  <img src=".assets/demo-y2k-big.gif" width="900" alt="Демо y2kexplorer">
 </p>
 
 ## Ограничения
