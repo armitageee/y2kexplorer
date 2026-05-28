@@ -28,7 +28,7 @@ The tool offers the following features:
 - **Authentication** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, Kerberos (GSSAPI) via keytab.
 - Four **UI themes** for dark or light terminals — switch at runtime with `T`.
 
-[![asciicast](https://asciinema.org/a/mtFnSVROdvCeQkC7.svg)](https://asciinema.org/a/mtFnSVROdvCeQkC7)
+[asciicast](.assets/demo-y2k-large.gif)
 
 ## Limitations
 
