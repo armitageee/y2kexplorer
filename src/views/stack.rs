@@ -88,4 +88,37 @@ impl ViewStack {
             ViewStack::ConnectorDetail(v) => &v.title,
         }
     }
+
+    /// Пары [`draw_help`]: короткий HINT или полный HELP (по `?`).
+    pub fn help_pairs(&self) -> &'static [&'static str] {
+        match self {
+            ViewStack::Topics(v) => v.help_pairs(),
+            ViewStack::Messages(v) => v.help_pairs(),
+            ViewStack::Groups(v) => v.help_pairs(),
+            ViewStack::GroupDetails(v) => v.help_pairs(),
+            ViewStack::Labels(v) => v.help_pairs(),
+            ViewStack::Contexts(v) => v.help_pairs(),
+            ViewStack::Acls(v) => v.help_pairs(),
+            ViewStack::Schemas(v) => v.help_pairs(),
+            ViewStack::SchemaDetail(v) => v.help_pairs(),
+            ViewStack::Connectors(v) => v.help_pairs(),
+            ViewStack::ConnectorDetail(v) => v.help_pairs(),
+        }
+    }
+
+    pub fn help_expanded(&self) -> bool {
+        match self {
+            ViewStack::Topics(v) => v.show_help,
+            ViewStack::Messages(v) => v.show_help,
+            ViewStack::Groups(v) => v.show_help,
+            ViewStack::GroupDetails(v) => v.show_help,
+            ViewStack::Labels(v) => v.show_help,
+            ViewStack::Contexts(v) => v.show_help,
+            ViewStack::Acls(v) => v.show_help,
+            ViewStack::Schemas(v) => v.show_help,
+            ViewStack::SchemaDetail(v) => v.show_help,
+            ViewStack::Connectors(v) => v.show_help,
+            ViewStack::ConnectorDetail(v) => v.show_help,
+        }
+    }
 }

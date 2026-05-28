@@ -1,20 +1,14 @@
-//! Y2K / PS2-flavored theme.
+//! Темы UI в духе [eilmeldung](https://github.com/christo-auer/eilmeldung):
+//! приглушённые rounded-рамки, акценты, выделение через `REVERSED`.
 //!
-//! Поддерживает две палитры:
-//! - [`Palette::Dark`]  — для тёмных терминалов (по умолчанию).
-//! - [`Palette::Light`] — для светлых терминалов.
+//! Палитры: `midnight` (тёмный), `cream` (тёплый светлый), `mono` (монохром на белом
+//! фоне), `latte` ([Catppuccin Latte](https://catppuccin.com/palette/)). Переключение в
+//! рантайме — клавиша `T` (см. [`cycle_palette`]).
 //!
-//! Палитра выбирается один раз на старте через [`init`] (из конфига или CLI-флага).
-//! Все стили доступны через accessor-функции (`theme::title()`, `theme::footer()` и т.п.) —
-//! это позволяет менять палитру без `const`-капкана.
-//!
-//! Цвета намеренно используются как [`Color::Indexed`] (xterm-256), а не named ANSI
-//! (`Color::Blue`, `Color::Cyan`, …). Named-цвета терминал переремапит под свою тему,
-//! из-за чего, например, footer на светлой теме становится тусклым. Indexed-цвета
-//! фиксированы в xterm-256 и одинаково яркие везде.
+//! Цвета — [`Color::Indexed`] (xterm-256), чтобы терминал не перекрашивал named ANSI.
 
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Borders};
@@ -23,16 +17,58 @@ use ratatui::widgets::{Block, BorderType, Borders};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Palette {
+    /// Тёмный: magenta/blue, как дефолт eilmeldung.
     #[default]
-    Dark,
-    Light,
+    Midnight,
+    /// Светлый: тёплые amber/brown акценты.
+    Cream,
+    /// Светлый: монохром, высокий контраст на белом фоне без ярких цветов.
+    Mono,
+    /// Светлый: [Catppuccin Latte](https://catppuccin.com/palette/) — приглушённые pastel.
+    Latte,
 }
 
 impl Palette {
+    pub const ALL: [Palette; 4] = [
+        Palette::Midnight,
+        Palette::Cream,
+        Palette::Mono,
+        Palette::Latte,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
-            Palette::Dark => "dark",
-            Palette::Light => "light",
+            Palette::Midnight => "midnight",
+            Palette::Cream => "cream",
+            Palette::Mono => "mono",
+            Palette::Latte => "latte",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Palette::Midnight => "Midnight",
+            Palette::Cream => "Cream",
+            Palette::Mono => "Mono",
+            Palette::Latte => "Latte",
+        }
+    }
+
+    pub fn is_dark(self) -> bool {
+        matches!(self, Palette::Midnight)
+    }
+
+    pub fn next(self) -> Palette {
+        let i = Self::ALL.iter().position(|p| *p == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    pub fn theme(self) -> Theme {
+        match self {
+            Palette::Midnight => midnight_theme(),
+            Palette::Cream => cream_theme(),
+            Palette::Mono => mono_theme(),
+            Palette::Latte => latte_theme(),
         }
     }
 }
@@ -41,9 +77,13 @@ impl FromStr for Palette {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
-            "" | "dark" => Ok(Palette::Dark),
-            "light" => Ok(Palette::Light),
-            other => Err(format!("unknown theme '{other}' (use dark|light)")),
+            "" | "dark" | "midnight" | "slate" => Ok(Palette::Midnight),
+            "cream" => Ok(Palette::Cream),
+            "light" | "paper" | "mono" => Ok(Palette::Mono),
+            "latte" => Ok(Palette::Latte),
+            other => Err(format!(
+                "unknown theme '{other}' (use midnight|cream|mono|latte; dark|light aliases ok)"
+            )),
         }
     }
 }
@@ -71,6 +111,7 @@ pub struct Theme {
     pub footer_hint: Style,
 
     pub block_border: Style,
+    pub block_border_focused: Style,
     pub block_title: Style,
     pub modal_border: Style,
     pub modal_label: Style,
@@ -80,29 +121,31 @@ pub struct Theme {
 
 // ---------- Active palette / accessors ----------
 
-static ACTIVE: OnceLock<Theme> = OnceLock::new();
+static ACTIVE: RwLock<Palette> = RwLock::new(Palette::Midnight);
 
-/// Инициализировать активную палитру. Вызывается из `main` до первого `render`.
-/// Повторный вызов игнорируется (палитру нельзя переключить в рантайме без перерисовки).
+/// Инициализировать палитру при старте (CLI / config).
 pub fn init(palette: Palette) {
-    let _ = ACTIVE.set(palette.theme());
-}
-
-#[inline]
-pub fn current() -> &'static Theme {
-    ACTIVE.get_or_init(|| Palette::default().theme())
-}
-
-impl Palette {
-    pub fn theme(self) -> Theme {
-        match self {
-            Palette::Dark => dark_theme(),
-            Palette::Light => light_theme(),
-        }
+    if let Ok(mut guard) = ACTIVE.write() {
+        *guard = palette;
     }
 }
 
-// Accessor-функции: ergonomic call-site (`theme::title()` вместо `theme::current().title`).
+pub fn active_palette() -> Palette {
+    ACTIVE.read().map(|g| *g).unwrap_or_default()
+}
+
+/// Следующая палитра по кругу; возвращает новую активную.
+pub fn cycle_palette() -> Palette {
+    let next = active_palette().next();
+    init(next);
+    next
+}
+
+#[inline]
+pub fn current() -> Theme {
+    active_palette().theme()
+}
+
 #[inline]
 pub fn title() -> Style {
     current().title
@@ -176,6 +219,10 @@ pub fn block_border() -> Style {
     current().block_border
 }
 #[inline]
+pub fn block_border_focused() -> Style {
+    current().block_border_focused
+}
+#[inline]
 pub fn block_title() -> Style {
     current().block_title
 }
@@ -196,159 +243,187 @@ pub fn modal_cursor() -> Style {
     current().modal_cursor
 }
 
-/// Builder для основного блока — двойная рамка, magenta-title с ✦ sparkle-маркерами.
+/// Основной блок: rounded-рамка, заголовок без декоративных символов.
 pub fn block(title_text: impl Into<String>) -> Block<'static> {
+    block_with_focus(title_text, true)
+}
+
+pub fn block_with_focus(title_text: impl Into<String>, focused: bool) -> Block<'static> {
+    let t = current();
     Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(current().block_border)
-        .title_style(current().block_title)
-        .title(format!(" ✦ {} ✦ ", title_text.into()))
+        .border_type(BorderType::Rounded)
+        .border_style(if focused {
+            t.block_border_focused
+        } else {
+            t.block_border
+        })
+        .title_style(t.block_title)
+        .title(format!(" {} ", title_text.into()))
 }
 
-// ---------- Dark palette ----------
-//
-// Yelower у footer фиксирован: насыщенный синий (xterm 20) + яркий белый — даёт
-// высокий контраст и на тёмной, и на светлой теме терминала.
+// ---------- Palette builders ----------
 
-fn dark_theme() -> Theme {
-    // Y2K accents
-    let cyan_bright = Color::Indexed(51); // #00ffff
-    let cyan_mid = Color::Indexed(45); // #00d7ff
-    let blue_ps2 = Color::Indexed(20); // #0000d7 — глубокий PS2 navy
-    let pink_hot = Color::Indexed(213); // #ff87ff — Y2K hot pink
-    let white = Color::Indexed(255); // bright chrome
-    let black = Color::Indexed(232); // near-black
-    let green_bright = Color::Indexed(82);
-    let red_bright = Color::Indexed(196);
+struct Colors {
+    fg: Color,
+    muted: Color,
+    accent: Color,
+    accent2: Color,
+    accent3: Color,
+    error: Color,
+    success: Color,
+    input_bg: Color,
+    marked_bg: Color,
+}
+
+/// Footer bar and key pills — одинаковые внутри dark/light группы, не зависят от accent темы.
+#[derive(Clone, Copy)]
+struct FooterColors {
+    bar_bg: Color,
+    bar_fg: Color,
+    title_fg: Color,
+    key_fg: Color,
+    key_bg: Color,
+}
+
+const FOOTER_DARK: FooterColors = FooterColors {
+    bar_bg: Color::Indexed(236),
+    bar_fg: Color::Indexed(252),
+    title_fg: Color::Indexed(255),
+    key_fg: Color::Indexed(236),
+    key_bg: Color::Indexed(255),
+};
+
+const FOOTER_LIGHT: FooterColors = FooterColors {
+    bar_bg: Color::Indexed(254),
+    bar_fg: Color::Indexed(238),
+    title_fg: Color::Indexed(234),
+    key_fg: Color::Indexed(255),
+    key_bg: Color::Indexed(236),
+};
+
+fn footer_styles(f: FooterColors) -> (Style, Style, Style, Style) {
+    let bar = Style::new().fg(f.bar_fg).bg(f.bar_bg);
+    let title = Style::new()
+        .fg(f.title_fg)
+        .bg(f.bar_bg)
+        .add_modifier(Modifier::BOLD);
+    // Без явного bg — наследует полосу footer; в модалках остаётся просто приглушённый текст.
+    let hint = Style::new().fg(f.bar_fg);
+    let key = Style::new()
+        .fg(f.key_fg)
+        .bg(f.key_bg)
+        .add_modifier(Modifier::BOLD);
+    (bar, title, key, hint)
+}
+
+fn from_colors(c: Colors, footer: FooterColors) -> Theme {
+    let (footer_bar, footer_title, footer_key, footer_hint) = footer_styles(footer);
 
     Theme {
-        title: Style::new().fg(cyan_bright).add_modifier(Modifier::BOLD),
-        header: Style::new().fg(cyan_mid).add_modifier(Modifier::BOLD),
-        // Hover/selected: black on bright cyan — стиль PS2-меню при наведении.
-        selected: Style::new()
-            .fg(black)
-            .bg(cyan_bright)
-            .add_modifier(Modifier::BOLD),
+        title: Style::new().fg(c.accent).add_modifier(Modifier::BOLD),
+        header: Style::new().fg(c.accent2).add_modifier(Modifier::BOLD),
+        selected: Style::new().add_modifier(Modifier::REVERSED),
         marked: Style::new()
-            .fg(white)
-            .bg(Color::Indexed(61))
+            .fg(c.fg)
+            .bg(c.marked_bg)
             .add_modifier(Modifier::BOLD),
-        row: Style::new().fg(white),
-        key: Style::new().fg(pink_hot).add_modifier(Modifier::BOLD),
-        value: Style::new().fg(white),
-        error: Style::new()
-            .fg(red_bright)
-            .bg(black)
-            .add_modifier(Modifier::BOLD),
-        success: Style::new().fg(green_bright).add_modifier(Modifier::BOLD),
-        tagline: Style::new().fg(pink_hot).add_modifier(Modifier::ITALIC),
-        sparkle: Style::new().fg(cyan_bright).add_modifier(Modifier::BOLD),
+        row: Style::new().fg(c.fg),
+        key: Style::new().fg(c.accent3).add_modifier(Modifier::BOLD),
+        value: Style::new().fg(c.fg),
+        error: Style::new().fg(c.error).add_modifier(Modifier::BOLD),
+        success: Style::new().fg(c.success).add_modifier(Modifier::BOLD),
+        tagline: Style::new().fg(c.muted).add_modifier(Modifier::ITALIC),
+        sparkle: Style::new().fg(c.accent3),
 
-        // Footer — фиксируется в обеих темах: синяя «лента» с ярким текстом.
-        footer_bg: blue_ps2,
-        footer_fg: white,
-        footer: Style::new()
-            .fg(white)
-            .bg(blue_ps2)
-            .add_modifier(Modifier::BOLD),
-        footer_title: Style::new()
-            .fg(pink_hot)
-            .bg(blue_ps2)
-            .add_modifier(Modifier::BOLD),
-        footer_key: Style::new()
-            .fg(black)
-            .bg(cyan_bright)
-            .add_modifier(Modifier::BOLD),
-        footer_hint: Style::new().fg(white).bg(blue_ps2),
+        footer_bg: footer.bar_bg,
+        footer_fg: footer.bar_fg,
+        footer: footer_bar,
+        footer_title,
+        footer_key,
+        footer_hint,
 
-        block_border: Style::new().fg(blue_ps2),
-        block_title: Style::new().fg(pink_hot).add_modifier(Modifier::BOLD),
-        modal_border: Style::new()
-            .fg(pink_hot)
-            .bg(black)
-            .add_modifier(Modifier::BOLD),
-        modal_label: Style::new().fg(cyan_bright).add_modifier(Modifier::BOLD),
-        modal_input: Style::new().fg(white).bg(Color::Indexed(238)),
+        block_border: Style::new().fg(c.muted),
+        block_border_focused: Style::new().fg(c.accent).add_modifier(Modifier::BOLD),
+        block_title: Style::new().fg(c.accent).add_modifier(Modifier::BOLD),
+        modal_border: Style::new().fg(c.accent).add_modifier(Modifier::BOLD),
+        modal_label: Style::new().fg(c.accent2).add_modifier(Modifier::BOLD),
+        modal_input: Style::new().fg(c.fg).bg(c.input_bg),
         modal_cursor: Style::new()
-            .fg(black)
-            .bg(white)
+            .fg(c.input_bg)
+            .bg(c.fg)
             .add_modifier(Modifier::BOLD),
     }
 }
 
-// ---------- Light palette ----------
-//
-// Светлая тема: фон терминала ≈ белый, поэтому шрифты делаем тёмными.
-// Footer оставляем «инвертированной лентой» — синий bg + белый fg — он одинаково
-// контрастен и на светлом, и на тёмном фоне терминала.
+fn midnight_theme() -> Theme {
+    from_colors(
+        Colors {
+            fg: Color::Indexed(252),
+            muted: Color::Indexed(240),
+            accent: Color::Indexed(213),
+            accent2: Color::Indexed(33),
+            accent3: Color::Indexed(45),
+            error: Color::Indexed(203),
+            success: Color::Indexed(82),
+            input_bg: Color::Indexed(236),
+            marked_bg: Color::Indexed(61),
+        },
+        FOOTER_DARK,
+    )
+}
 
-fn light_theme() -> Theme {
-    let cyan_dark = Color::Indexed(31); // #0087af — приглушённый dark cyan
-    let blue_dark = Color::Indexed(19); // #0000af — глубокий navy для рамок
-    let blue_ps2 = Color::Indexed(20); // тот же что и в dark — для footer
-    let pink_dark = Color::Indexed(165); // #d700d7 — Y2K hot pink, читаемый на белом
-    let pink_hot = Color::Indexed(213); // ярко-розовый, для footer-title (на синем)
-    let cyan_bright = Color::Indexed(51); // для FOOTER_KEY (на синем)
-    let white = Color::Indexed(255);
-    let black = Color::Indexed(232);
-    let dark_grey = Color::Indexed(236);
-    let green_dark = Color::Indexed(28); // dark green — читаемый на белом
-    let red_bright = Color::Indexed(160);
+fn cream_theme() -> Theme {
+    from_colors(
+        Colors {
+            fg: Color::Indexed(237),
+            muted: Color::Indexed(244),
+            accent: Color::Indexed(130),
+            accent2: Color::Indexed(94),
+            accent3: Color::Indexed(172),
+            error: Color::Indexed(167),
+            success: Color::Indexed(64),
+            input_bg: Color::Indexed(255),
+            marked_bg: Color::Indexed(222),
+        },
+        FOOTER_LIGHT,
+    )
+}
 
-    Theme {
-        title: Style::new().fg(cyan_dark).add_modifier(Modifier::BOLD),
-        header: Style::new().fg(blue_dark).add_modifier(Modifier::BOLD),
-        // Selected: white on PS2-blue — высоко-контрастный hover на белом фоне.
-        selected: Style::new()
-            .fg(white)
-            .bg(blue_ps2)
-            .add_modifier(Modifier::BOLD),
-        marked: Style::new()
-            .fg(white)
-            .bg(Color::Indexed(61))
-            .add_modifier(Modifier::BOLD),
-        row: Style::new().fg(black),
-        key: Style::new().fg(pink_dark).add_modifier(Modifier::BOLD),
-        value: Style::new().fg(black),
-        error: Style::new()
-            .fg(white)
-            .bg(red_bright)
-            .add_modifier(Modifier::BOLD),
-        success: Style::new().fg(green_dark).add_modifier(Modifier::BOLD),
-        tagline: Style::new().fg(pink_dark).add_modifier(Modifier::ITALIC),
-        sparkle: Style::new().fg(cyan_dark).add_modifier(Modifier::BOLD),
+/// Монохромная палитра для белого/светлого фона терминала.
+fn mono_theme() -> Theme {
+    from_colors(
+        Colors {
+            fg: Color::Indexed(234),
+            muted: Color::Indexed(245),
+            accent: Color::Indexed(238),
+            accent2: Color::Indexed(240),
+            accent3: Color::Indexed(242),
+            error: Color::Indexed(237),
+            success: Color::Indexed(243),
+            input_bg: Color::Indexed(255),
+            marked_bg: Color::Indexed(252),
+        },
+        FOOTER_LIGHT,
+    )
+}
 
-        // Footer одинаков обеих тем: blue bg + white fg.
-        footer_bg: blue_ps2,
-        footer_fg: white,
-        footer: Style::new()
-            .fg(white)
-            .bg(blue_ps2)
-            .add_modifier(Modifier::BOLD),
-        footer_title: Style::new()
-            .fg(pink_hot)
-            .bg(blue_ps2)
-            .add_modifier(Modifier::BOLD),
-        footer_key: Style::new()
-            .fg(black)
-            .bg(cyan_bright)
-            .add_modifier(Modifier::BOLD),
-        footer_hint: Style::new().fg(white).bg(blue_ps2),
-
-        block_border: Style::new().fg(blue_dark),
-        block_title: Style::new().fg(pink_dark).add_modifier(Modifier::BOLD),
-        modal_border: Style::new()
-            .fg(pink_dark)
-            .bg(white)
-            .add_modifier(Modifier::BOLD),
-        modal_label: Style::new().fg(cyan_dark).add_modifier(Modifier::BOLD),
-        modal_input: Style::new().fg(black).bg(Color::Indexed(254)),
-        modal_cursor: Style::new()
-            .fg(white)
-            .bg(dark_grey)
-            .add_modifier(Modifier::BOLD),
-    }
+/// Catppuccin Latte — https://catppuccin.com/palette/
+fn latte_theme() -> Theme {
+    from_colors(
+        Colors {
+            fg: Color::Indexed(239),        // text #4c4f69
+            muted: Color::Indexed(244),     // overlay0 #9ca0b0
+            accent: Color::Indexed(135),    // mauve #8839ef
+            accent2: Color::Indexed(31),    // sapphire #209fb5
+            accent3: Color::Indexed(30),    // teal #179299
+            error: Color::Indexed(160),     // red #d20f39
+            success: Color::Indexed(28),    // green #40a02b
+            input_bg: Color::Indexed(255),  // base #eff1f5
+            marked_bg: Color::Indexed(251), // surface0 #ccd0da
+        },
+        FOOTER_LIGHT,
+    )
 }
 
 #[cfg(test)]
@@ -357,18 +432,22 @@ mod tests {
 
     #[test]
     fn parse_palette() {
-        assert_eq!(Palette::from_str("dark").unwrap(), Palette::Dark);
-        assert_eq!(Palette::from_str("Light").unwrap(), Palette::Light);
-        assert_eq!(Palette::from_str("").unwrap(), Palette::Dark);
+        assert_eq!(Palette::from_str("midnight").unwrap(), Palette::Midnight);
+        assert_eq!(Palette::from_str("dark").unwrap(), Palette::Midnight);
+        assert_eq!(Palette::from_str("slate").unwrap(), Palette::Midnight);
+        assert_eq!(Palette::from_str("cream").unwrap(), Palette::Cream);
+        assert_eq!(Palette::from_str("mono").unwrap(), Palette::Mono);
+        assert_eq!(Palette::from_str("paper").unwrap(), Palette::Mono);
+        assert_eq!(Palette::from_str("light").unwrap(), Palette::Mono);
+        assert_eq!(Palette::from_str("latte").unwrap(), Palette::Latte);
         assert!(Palette::from_str("blah").is_err());
     }
 
     #[test]
-    fn footer_uses_indexed_colors_in_both_themes() {
-        let dark = Palette::Dark.theme();
-        let light = Palette::Light.theme();
-        // Сам факт того, что footer сильно отличается от content — проверка через bg.
-        assert_eq!(dark.footer_bg, light.footer_bg);
-        assert_eq!(dark.footer_fg, light.footer_fg);
+    fn cycle_wraps() {
+        init(Palette::Latte);
+        assert_eq!(cycle_palette(), Palette::Midnight);
+        init(Palette::Midnight);
+        assert_eq!(cycle_palette(), Palette::Cream);
     }
 }

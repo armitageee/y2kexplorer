@@ -31,6 +31,14 @@ pub struct GroupDetailsView {
 }
 
 impl GroupDetailsView {
+    pub fn help_pairs(&self) -> &'static [&'static str] {
+        if self.show_help {
+            HELP
+        } else {
+            HINT
+        }
+    }
+
     pub fn new(group: impl Into<String>) -> Self {
         let group = group.into();
         Self {
@@ -96,10 +104,6 @@ impl GroupDetailsView {
     ) {
         self.table.render(frame, main);
         draw_status(frame, status_area, cluster, status, loading);
-        if self.show_help {
-            draw_help(frame, keys_area, HELP);
-        } else {
-            draw_help(frame, keys_area, HINT);
-        }
+        draw_help(frame, keys_area, self.help_pairs());
     }
 }

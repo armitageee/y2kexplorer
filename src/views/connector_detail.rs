@@ -1,6 +1,6 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::kafka_connect::ConnectorDetail;
@@ -43,6 +43,14 @@ pub struct ConnectorDetailView {
 }
 
 impl ConnectorDetailView {
+    pub fn help_pairs(&self) -> &'static [&'static str] {
+        if self.show_help {
+            HELP
+        } else {
+            HINT
+        }
+    }
+
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -101,13 +109,7 @@ impl ConnectorDetailView {
                 Span::raw("  "),
                 Span::styled(meta, theme::value()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(theme::block_border())
-                    .title(" connector ")
-                    .title_style(theme::block_title()),
-            ),
+            .block(theme::block("connector")),
             chunks[0],
         );
 
@@ -120,23 +122,13 @@ impl ConnectorDetailView {
 
         frame.render_widget(
             Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(theme::block_border())
-                        .title(" status / config ")
-                        .title_style(theme::block_title()),
-                )
+                .block(theme::block("status / config"))
                 .wrap(Wrap { trim: false }),
             chunks[1],
         );
 
         draw_status(frame, status_area, cluster, status, loading);
-        if self.show_help {
-            draw_help(frame, keys_area, HELP);
-        } else {
-            draw_help(frame, keys_area, HINT);
-        }
+        draw_help(frame, keys_area, self.help_pairs());
     }
 }
 

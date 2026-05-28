@@ -15,8 +15,9 @@
 
 A keyboard-driven dashboard for Apache Kafka — in spirit close to
 [k9s](https://github.com/derailed/k9s), but in Rust on
-[ratatui](https://docs.rs/ratatui), with a Y2K/PS2-flavored skin: deep blues,
-chrome cyan, magenta accents, double-line borders.
+[ratatui](https://docs.rs/ratatui). The UI follows a clean multi-panel layout
+inspired by [eilmeldung](https://github.com/christo-auer/eilmeldung): rounded
+borders, muted panels, reversed selection, and a compact status bar.
 
 [![asciicast](https://asciinema.org/a/mtFnSVROdvCeQkC7.svg)](https://asciinema.org/a/mtFnSVROdvCeQkC7)
 
@@ -33,6 +34,36 @@ chrome cyan, magenta accents, double-line borders.
 - **Kafka Connect** — list connectors, status/tasks, config; pause / resume / restart / delete (`7` / `:connect`)
 - **Multi-cluster config** — switch contexts in-app (`:context <name>`)
 - **Authentication** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) via keytab**
+- **UI themes** — four palettes (one for dark terminals, three for light); switch at runtime with `T`
+
+## UI themes
+
+Four color palettes tuned for **dark** or **light** terminal backgrounds. Pick one at
+startup (`--theme` or `defaults.theme` in config) or cycle in the TUI with **`T`**
+(the current theme name appears in the status bar).
+
+| Name | Terminal background | Character |
+|---|---|---|
+| `midnight` (default) | dark | magenta / blue accents — closest to eilmeldung defaults |
+| `cream` | light | warm amber / brown accents |
+| `mono` | light | monochrome grays — high contrast on a white background, no bright colors |
+| `latte` | light | [Catppuccin Latte](https://catppuccin.com/palette/) — muted pastels |
+
+**Aliases** (backward compatible): `dark` → `midnight`, `light` → `mono`, `paper` → `mono`, `slate` → `midnight`.
+
+```bash
+y2k --theme mono
+y2k --theme latte
+```
+
+```toml
+[defaults]
+theme = "midnight"   # midnight | cream | mono | latte
+```
+
+**Keybindings footer:** hints wrap to multiple lines when the terminal is narrow; if
+they still do not fit, a `… +N` suffix shows how many entries are hidden — press **`?`**
+for the full list on up to four lines (on taller terminals).
 
 ## Installation
 
@@ -128,13 +159,12 @@ Run with:
 y2k                            # default cluster from defaults.cluster
 y2k --cluster <name>           # pick a cluster from [clusters.<name>]
 y2k --config /path/to.toml     # custom config path
-y2k --theme light              # UI theme: `dark` (default) or `light`
+y2k --theme mono              # UI theme (see «UI themes» above)
 y2k-probe --cluster <name>     # connection smoke test, no TUI
 ```
 
-The theme can also be persisted in config via `defaults.theme = "light"`.
-Use `light` if your terminal background is bright — colors switch to a darker
-palette while the status bar stays high-contrast.
+See [UI themes](#ui-themes) for `midnight`, `cream`, `mono`, `latte`, and aliases
+`dark` / `light`.
 
 ### Topic-list performance
 
@@ -186,7 +216,8 @@ See [`config.example.toml`](config.example.toml) for full examples.
 | `r` | refresh current view |
 | `:` | command palette (`context`, `clusters`, `groups`, `labels`, `acls`, `schemas`, `connect`, `label`, `limit`, `poll`, `help`) |
 | `1` / `2` / `3` / `4` / `5` / `6` / `7` | sidebar: Topics / Groups / Labels / Contexts / ACLs / Schemas / Connect |
-| `?` | toggle help |
+| `?` | toggle short / full keybinding help |
+| `T` | cycle UI theme (`midnight` → `cream` → `mono` → `latte`) |
 | `q` | quit |
 
 ### Topics
