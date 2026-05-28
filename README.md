@@ -13,405 +13,75 @@
   <a href="README_RU.md">Русская версия</a>
 </p>
 
-A keyboard-driven dashboard for Apache Kafka — in spirit close to
-[k9s](https://github.com/derailed/k9s), but in Rust on
-[ratatui](https://docs.rs/ratatui). The UI follows a clean multi-panel layout
-inspired by [eilmeldung](https://github.com/christo-auer/eilmeldung): rounded
-borders, muted panels, reversed selection, and a compact status bar.
+y2kexplorer is a keyboard-driven terminal user interface (TUI) for exploring and operating an Apache Kafka cluster.
+It is an alternative in spirit to [k9s](https://github.com/derailed/k9s), [AKHQ](https://akhq.io/), or [Redpanda Console](https://www.redpanda.com/redpanda-console-kafka-ui) — but built in Rust on [ratatui](https://docs.rs/ratatui) with a clean multi-panel layout inspired by [eilmeldung](https://github.com/christo-auer/eilmeldung).
+
+The tool offers the following features:
+
+- Browse **topics** with filter, partition metadata, and optional message counts.
+- Read **messages** — head / tail, per-partition view, time-sorting, live follow, JSON pretty-print.
+- **Produce** messages and **create / delete topics**.
+- Manage **consumer groups** — list, lag, reset offsets, delete empty groups.
+- **Schema Registry** — subjects, versions, Avro/JSON schema bodies.
+- **Kafka Connect** — connectors, status, pause / resume / restart / delete.
+- **ACLs**, local **topic labels**, and **multi-cluster** switching in-app.
+- **Authentication** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, Kerberos (GSSAPI) via keytab.
+- Four **UI themes** for dark or light terminals — switch at runtime with `T`.
 
 [![asciicast](https://asciinema.org/a/mtFnSVROdvCeQkC7.svg)](https://asciinema.org/a/mtFnSVROdvCeQkC7)
 
-## Features
+## Limitations
 
-- **Topics** — list with filter (`/`), partition / replication / message-count columns
-- **Messages** — head / tail, configurable limit, per-partition view, time-sorting, live follow
-- **Produce** — send messages with key + payload (`n`)
-- **Create / delete topics** (`c` / `d`)
-- **Consumer groups** — list, state, members, lag per partition (`g` / `:groups`)
-- **Reset offsets** — `earliest` / `latest` / `offset:N` / `timestamp:UNIX_MS` (`R`)
-- **Delete empty groups** (`d` on Groups)
-- **Schema Registry** — browse subjects, versions, and Avro/JSON schema bodies (`6` / `:schemas`)
-- **Kafka Connect** — list connectors, status/tasks, config; pause / resume / restart / delete (`7` / `:connect`)
-- **Multi-cluster config** — switch contexts in-app (`:context <name>`)
-- **Authentication** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) via keytab**
-- **UI themes** — four palettes (one for dark terminals, three for light); switch at runtime with `T`
+- Designed for day-to-day exploration and light operations — not a full cluster admin replacement.
+- Avro schemas are displayed from Schema Registry; no embedded schema-registry client beyond HTTP browse.
+- Large topic lists can be slow when message counts are enabled (see [configuration](docs/en/configuration.md#topic-list-performance)).
+- Pre-built Linux binaries target glibc 2.35+ (Ubuntu 22.04 era); older distros need a source build.
 
-## UI themes
-
-Four color palettes tuned for **dark** or **light** terminal backgrounds. Pick one at
-startup (`--theme` or `defaults.theme` in config) or cycle in the TUI with **`T`**
-(the current theme name appears in the status bar).
-
-| Name | Terminal background | Character |
-|---|---|---|
-| `midnight` (default) | dark | magenta / blue accents — closest to eilmeldung defaults |
-| `cream` | light | warm amber / brown accents |
-| `mono` | light | monochrome grays — high contrast on a white background, no bright colors |
-| `latte` | light | [Catppuccin Latte](https://catppuccin.com/palette/) — muted pastels |
-
-**Aliases** (backward compatible): `dark` → `midnight`, `light` → `mono`, `paper` → `mono`, `slate` → `midnight`.
-
-```bash
-y2k --theme mono
-y2k --theme latte
-```
-
-```toml
-[defaults]
-theme = "midnight"   # midnight | cream | mono | latte
-```
-
-**Keybindings footer:** hints wrap to multiple lines when the terminal is narrow; if
-they still do not fit, a `… +N` suffix shows how many entries are hidden — press **`?`**
-for the full list on up to four lines (on taller terminals).
-
-## Installation
-
-### Pre-built binaries (recommended)
-
-Each `v*` tag publishes self-contained tarballs for two platforms.
-
-#### macOS (Apple Silicon, arm64)
-
-```bash
-TAG=v0.0.2-rc        # use the latest tag from Releases
-VER=${TAG#v}
-curl -LO "https://github.com/armitageee/y2kexplorer/releases/download/${TAG}/y2kexplorer-${VER}-aarch64-apple-darwin.tar.gz"
-tar -xzf "y2kexplorer-${VER}-aarch64-apple-darwin.tar.gz"
-cd "y2kexplorer-${VER}-aarch64-apple-darwin"
-
-# strip Gatekeeper quarantine if downloaded via browser
-xattr -dr com.apple.quarantine .
-
-./y2k --help
-```
-
-All required `.dylib`s (`libsasl2`, `libssl`, `libcrypto`, `libkrb5`, `libcurl`, …) are bundled
-into `lib/` next to the binary and rewritten to `@executable_path/lib/...` via `dylibbundler`.
-You **don't need** `brew install cyrus-sasl krb5 openssl@3`.
-
-> If you still see `library load disallowed by system policy`, the CI signing step didn't
-> reach the dylibs in this release — re-sign locally:
-> ```bash
-> codesign --force --sign - lib/*.dylib
-> codesign --force --sign - y2k y2k-probe
-> ```
-
-#### Linux (x86_64)
-
-Built on Ubuntu 22.04 (glibc 2.35); compatible with **Ubuntu 22.04+**, **Debian 12+**,
-**RHEL/Rocky/Alma 9+**, **Fedora 36+**, **openSUSE Leap 15.5+**, Arch.
-
-```bash
-# 1. system libraries (once)
-sudo apt install libsasl2-2 libssl3 libkrb5-3 libcurl4         # Debian/Ubuntu
-# or
-sudo dnf install cyrus-sasl-lib openssl-libs krb5-libs libcurl  # Fedora/RHEL
-
-# 2. download & run
-TAG=v0.0.2-rc
-VER=${TAG#v}
-curl -LO "https://github.com/armitageee/y2kexplorer/releases/download/${TAG}/y2kexplorer-${VER}-x86_64-unknown-linux-gnu.tar.gz"
-tar -xzf "y2kexplorer-${VER}-x86_64-unknown-linux-gnu.tar.gz"
-cd "y2kexplorer-${VER}-x86_64-unknown-linux-gnu"
-./y2k --help
-```
-
-> Won't run on Ubuntu 20.04 / Debian 11 / RHEL 8 / Alpine (older glibc or musl) —
-> build from source instead.
-
-### Build from source
-
-Requires Rust 1.75+, CMake, pkg-config, OpenSSL, Cyrus SASL, MIT Kerberos and libcurl:
-
-```bash
-# macOS
-brew install cmake pkg-config openssl@3 cyrus-sasl krb5
-
-# Debian/Ubuntu
-sudo apt install cmake pkg-config libsasl2-dev libssl-dev libkrb5-dev libcurl4-openssl-dev
-```
-
-Then:
-
-```bash
-git clone https://github.com/armitageee/y2kexplorer.git
-cd y2kexplorer
-cargo build --release --bin y2k --bin y2k-probe --all-features
-./target/release/y2k --help
-```
-
-If you have [`just`](https://github.com/casey/just), run `just build` instead.
-
-## Configuration
-
-Default config path: `~/.config/y2kexplorer/config.toml`.
+## Getting started
 
 ```bash
 mkdir -p ~/.config/y2kexplorer
 cp config.example.toml ~/.config/y2kexplorer/config.toml
 $EDITOR ~/.config/y2kexplorer/config.toml
-```
 
-Run with:
-
-```bash
-y2k                            # default cluster from defaults.cluster
-y2k --cluster <name>           # pick a cluster from [clusters.<name>]
-y2k --config /path/to.toml     # custom config path
-y2k --theme mono              # UI theme (see «UI themes» above)
+y2k                            # default cluster from config
+y2k --cluster <name>           # pick a named cluster
 y2k-probe --cluster <name>     # connection smoke test, no TUI
 ```
 
-See [UI themes](#ui-themes) for `midnight`, `cream`, `mono`, `latte`, and aliases
-`dark` / `light`.
+Pre-built binaries for **macOS arm64** and **Linux x86_64** are published on the [Releases](https://github.com/armitageee/y2kexplorer/releases) page.
+To build from source: `cargo build --release --bin y2k --bin y2k-probe --all-features`.
 
-### Topic-list performance
+See [Installation](docs/en/installation.md) for platform-specific steps and bundled libraries.
 
-The Topics view computes a `MESSAGES` column by querying low/high watermarks
-per partition. On clusters with many topics (or high broker latency), this can
-dominate initial load time. Two knobs control this:
+## Try it
 
-```toml
-[defaults]
-# Skip per-topic message counts entirely — instant load, MESSAGES column = 0.
-fetch_watermarks = true        # default true
-# How many threads pipeline watermark RPCs in parallel (1..=64).
-watermark_parallelism = 16     # default 16
-```
-
-Reference numbers (Kerberos+TLS cluster, 84 topics / 720 partitions):
-
-| Mode | Time |
-|---|---|
-| sequential (legacy) | ~103 s |
-| parallel(16) | ~6.4 s |
-| `fetch_watermarks = false` | ~3 s (metadata only) |
-
-Run `y2k-probe -c <cluster> --bench-topics` to measure on your own cluster.
-
-### Authentication
-
-Each cluster has its own `[clusters.<name>.auth]` section. Supported types:
-
-| `type` | Required fields | Notes |
-|---|---|---|
-| `none` | — | PLAINTEXT, no auth |
-| `sasl_plain` | `username`, `password`, `tls` | |
-| `sasl_scram` | `username`, `password`, `mechanism` (`SCRAM-SHA-256` or `SCRAM-SHA-512`), `tls` | |
-| `ssl` | `ca_location`, `certificate_location`, `key_location`, `key_password` | mTLS |
-| `kerberos` | `keytab`, `principal`, `service_name`, `tls`, optional `krb5_conf`, `ssl_ca` | GSSAPI via keytab |
-
-See [`config.example.toml`](config.example.toml) for full examples.
-
-## Keybindings
-
-### Global
-
-| Key | Action |
-|---|---|
-| `j` / `k`, `↑` / `↓` | navigate |
-| `Enter` | open selection |
-| `Esc` | back / close modal |
-| `r` | refresh current view |
-| `:` | command palette (`context`, `clusters`, `groups`, `labels`, `acls`, `schemas`, `connect`, `label`, `limit`, `poll`, `help`) |
-| `1` / `2` / `3` / `4` / `5` / `6` / `7` | sidebar: Topics / Groups / Labels / Contexts / ACLs / Schemas / Connect |
-| `?` | toggle short / full keybinding help |
-| `T` | cycle UI theme (`midnight` → `cream` → `mono` → `latte`) |
-| `q` | quit |
-
-### Topics
-
-| Key | Action |
-|---|---|
-| `Space` | mark / unmark topic (k9s-style multi-select) |
-| `L` | add label to marked (or current) topic(s) |
-| `U` | remove label from marked (or current) topic(s) |
-| `D` | clear all marks |
-| `/` | text filter |
-| `Enter` | open messages for selected topic |
-| `n` | produce — open key + payload editor |
-| `c` | create topic (with partitions) |
-| `d` | delete topic (confirm with `y`) |
-| `p` | partition metadata popup |
-| `g` | Consumer Groups (sidebar `2`) |
-
-### Labels
-
-Local tags per topic (stored in `config.toml`, not on the broker). Use them to group topics by microservice, env, team, etc.
-
-| Key | Action |
-|---|---|
-| `Enter` | open Topics filtered by this label |
-| `d` | delete label from all topics in cluster (confirm `y`) |
-| `/` | filter label list |
-| `1` / `2` / `3` / `4` / `5` / `6` | sidebar navigation |
-
-Config example:
-
-```toml
-[topic_labels.lt01]
-"orders" = ["order-service", "prod"]
-```
-
-Commands: `:labels`, `:label billing` (filter topics), `:label-delete billing` (remove everywhere).
-
-### Contexts
-
-Browse and switch Kafka clusters defined in `config.toml`.
-
-| Key | Action |
-|---|---|
-| `Enter` | switch to selected cluster (reconnect + Topics) |
-| `/` | filter context list |
-| `4` | open Contexts from anywhere (sidebar) |
-
-Commands: `:contexts`, `:context <name>` (quick switch without the menu).
-
-### ACLs
-
-List and manage Kafka ACLs (requires a cluster with the standard authorizer enabled and admin rights on your principal).
-
-| Key | Action |
-|---|---|
-| `/` | filter ACL list |
-| `c` | create ACL (form: resource type/name, pattern, principal, host, operation, permission) |
-| `e` | edit selected ACL (delete old binding + create new — Kafka has no in-place update) |
-| `d` | delete selected ACL (confirm `y`) |
-| `r` | refresh |
-| `5` | open ACLs from anywhere (sidebar) |
-
-Commands: `:acls`
-
-Resource types in the form: `topic`, `group`, `broker`, `cluster` (cluster ACL uses resource name `kafka-cluster`), `transactional_id`. Pattern: `literal`, `prefixed`, `match`. Permission: `allow` / `deny`.
-
-### Schemas (Schema Registry)
-
-Confluent Schema Registry is a separate HTTP service (not the Kafka protocol). Per cluster, add `[clusters.<name>.schema_registry]` with `url` — see [`config.example.toml`](config.example.toml).
-
-| Key | Action |
-|---|---|
-| `/` | filter subjects |
-| `Enter` | open schema detail (latest version) |
-| `j` / `k` | cycle versions in detail view |
-| `u` / `d` | scroll schema JSON |
-| `r` | refresh |
-| `6` | Schemas screen (sidebar) |
-
-Commands: `:schemas`, `:schema <subject>`, `:sr <subject>`
-
-### Connect (Kafka Connect)
-
-Kafka Connect is a separate REST API (`GET /connectors`, etc.). Per cluster, add `[clusters.<name>.kafka_connect]` with `url` — see [`config.example.toml`](config.example.toml).
-
-| Key | Action |
-|---|---|
-| `/` | filter connectors |
-| `Enter` | open connector detail (status, tasks, config JSON) |
-| `P` / `O` | pause / resume connector |
-| `R` | restart connector |
-| `d` | delete connector (confirm `y`) |
-| `u` / `PageUp` / `PageDown` | scroll config in detail view |
-| `r` | refresh |
-| `7` | Connect screen (sidebar) |
-
-Commands: `:connect`, `:connectors`
-
-### Messages
-
-| Key | Action |
-|---|---|
-| `b` / `t` | tail (from end) / head (from start) |
-| `p` | cycle partition (all → 0 → 1 → …) |
-| `i` | partition metadata popup |
-| `s` | toggle time-sort vs offset-sort |
-| `+` / `-` | change message limit ±50 (10–10000) |
-| `l` | enter exact message limit |
-| `f` | live follow — poll new messages periodically |
-| `[` / `]` | live-poll interval ±1s (1–30) |
-| `o` | toggle pretty-print JSON |
-| `y` | yank selected message to clipboard |
-| `u` / `d` | scroll detail pane |
-| `PgUp` / `PgDn` | scroll detail pane fast |
-| `n` | produce |
-
-### Consumer groups
-
-| Key | Action |
-|---|---|
-| `/` | filter by id |
-| `Enter` | group details (offsets / lag) |
-| `R` | reset offsets |
-| `d` | delete group (only when state is `Empty` / `Dead`) |
-
-`R` opens a modal with a single **spec** field. Accepted values:
-
-| Spec | Effect |
-|---|---|
-| `earliest` | move to low watermark of every partition |
-| `latest` | move to high watermark (LEO) |
-| `offset:N` | absolute N (clamped to `[low, high]` per partition) |
-| `timestamp:UNIX_MS` | first offset with `timestamp >= UNIX_MS` (via `offsets_for_times`) |
-
-> **Note:** offset reset only works when the group has **no active members**
-> (state ∈ {`Empty`, `Dead`}). Otherwise the broker returns `REBALANCE_IN_PROGRESS`.
-> y2kexplorer pre-checks the group state and surfaces a clear error if the group is live.
-
-## Try it locally with Docker
-
-A minimal KRaft Kafka cluster with **SASL/PLAIN**, **ACL** (StandardAuthorizer), **Schema Registry**, and a **Kafka Connect** demo pipeline is included:
-
-| User | Password | Role |
-|---|---|---|
-| `admin` | `admin-secret` | super user — ACL admin, all topics |
-| `app` | `app-secret` | limited — sample ACL: Read+Describe on `orders` |
+> [!NOTE]
+> Docker is required for the bundled local KRaft stack (SASL/PLAIN, ACL, Schema Registry, Kafka Connect demo).
 
 ```bash
-just up                    # or: docker compose up -d
-just dev                   # or: cargo run --release -- --cluster local
-just down                  # tear down
+git clone https://github.com/armitageee/y2kexplorer.git
+cd y2kexplorer
+cp config.example.toml ~/.config/y2kexplorer/config.toml
+
+just up      # or: docker compose up -d
+just dev     # or: cargo run --release -- --cluster local
 ```
 
-Copy `config.example.toml` → `~/.config/y2kexplorer/config.toml` (include `[clusters.local.schema_registry]` and `[clusters.local.kafka_connect]`). After `docker compose up -d`:
+Details: [Local Docker stack](docs/en/docker.md).
 
-- `schema-init` registers Avro schemas for `orders`, `users.events`, and `payments.retry` (`*-value` subjects).
-- `events-generator` appends JSON lines to `docker/connect-data/events.json` every ~2s.
-- `connect-init` registers two connectors:
-  - **file-source** — reads `/data/events.json` → topic **`connect.events`**
-  - **file-sink** — consumes **`connect.events`** → `/data/sink.json` (on the host: `docker/connect-data/sink.json`)
+## Documentation
 
-| Service | URL |
+| Topic | Guide |
 |---|---|
-| Kafka (SASL/PLAIN) | `localhost:9092` |
-| Schema Registry | <http://localhost:8081> |
-| Kafka Connect REST | <http://localhost:8083> |
-| Kafka UI | <http://localhost:8080> (admin) |
+| Installation | [docs/en/installation.md](docs/en/installation.md) |
+| Configuration & auth | [docs/en/configuration.md](docs/en/configuration.md) |
+| UI themes | [docs/en/themes.md](docs/en/themes.md) |
+| Keybindings | [docs/en/keybindings.md](docs/en/keybindings.md) |
+| Local Docker stack | [docs/en/docker.md](docs/en/docker.md) |
+| Development | [docs/en/development.md](docs/en/development.md) |
 
-Smoke-test SR: `curl -s http://localhost:8081/subjects`. In the TUI: `6` or `:schemas`.
-
-Smoke-test Connect: `curl -s http://localhost:8083/connectors`. In the TUI: `7` or `:connect`. Watch the pipeline: `tail -f docker/connect-data/sink.json`.
-
-## Development
-
-If you have [`just`](https://github.com/casey/just):
-
-```bash
-just                # list tasks
-just dev            # cargo run --release
-just ci             # fmt --check + clippy -D warnings + test
-just probe local    # y2k-probe --cluster local
-just release v0.1.0 # tag + push (triggers Release workflow)
-```
-
-Otherwise the equivalents are:
-
-```bash
-cargo run --release
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features -- --skip fetch_messages_from_local_orders
-cargo build --release --locked --bin y2k --bin y2k-probe --all-features
-```
+Full index: [docs/README.md](docs/README.md) · [docs/README.ru.md](docs/README.ru.md) (русский).
 
 ## License
 
