@@ -1,6 +1,7 @@
 use ratatui::layout::Rect;
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::ui::theme;
@@ -19,7 +20,8 @@ const ITEMS: [(Screen, &str); 7] = [
 pub fn draw_sidebar(frame: &mut Frame, area: Rect, active: Screen) {
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(theme::block_border())
+        .border_type(BorderType::Rounded)
+        .border_style(theme::block_border_focused())
         .title(" nav ")
         .title_style(theme::block_title());
 
@@ -29,15 +31,19 @@ pub fn draw_sidebar(frame: &mut Frame, area: Rect, active: Screen) {
         .map(|(i, (screen, label))| {
             let key = (b'1' + i as u8) as char;
             let is_active = *screen == active;
-            let style = if is_active {
-                theme::selected()
+            let mut spans = vec![Span::styled(format!("{key} "), theme::key())];
+            if is_active {
+                spans.push(Span::styled(
+                    format!("▸ {label}"),
+                    theme::selected().patch(theme::row()),
+                ));
             } else {
-                theme::row()
-            };
-            Line::from(vec![
-                Span::styled(format!("{key} "), theme::key()),
-                Span::styled(*label, style),
-            ])
+                spans.push(Span::styled(
+                    format!("  {label}"),
+                    theme::row().add_modifier(Modifier::DIM),
+                ));
+            }
+            Line::from(spans)
         })
         .collect();
 

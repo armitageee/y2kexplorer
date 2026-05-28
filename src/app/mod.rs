@@ -436,6 +436,7 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('?') => self.toggle_help(),
+            KeyCode::Char('T') => self.cycle_theme(),
             KeyCode::Char('r') => self.refresh_current(),
             KeyCode::Char('/') => match self.current() {
                 ViewStack::Topics(v) => {
@@ -805,6 +806,11 @@ impl App {
             ViewStack::Connectors(v) => v.show_help = !v.show_help,
             ViewStack::ConnectorDetail(v) => v.show_help = !v.show_help,
         }
+    }
+
+    fn cycle_theme(&mut self) {
+        let p = crate::ui::theme::cycle_palette();
+        self.status = format!("theme: {} ({})", p.label(), p.as_str());
     }
 
     fn nav_down(&mut self) {
@@ -1688,22 +1694,19 @@ impl App {
         let status = self.status.clone();
         let loading = self.loading;
 
-        let show_help = match self.current() {
-            ViewStack::Topics(v) => v.show_help,
-            ViewStack::Messages(v) => v.show_help,
-            ViewStack::Groups(v) => v.show_help,
-            ViewStack::GroupDetails(v) => v.show_help,
-            ViewStack::Labels(v) => v.show_help,
-            ViewStack::Contexts(v) => v.show_help,
-            ViewStack::Acls(v) => v.show_help,
-            ViewStack::Schemas(v) => v.show_help,
-            ViewStack::SchemaDetail(v) => v.show_help,
-            ViewStack::Connectors(v) => v.show_help,
-            ViewStack::ConnectorDetail(v) => v.show_help,
+        let current = self.current();
+        let help_pairs = current.help_pairs();
+        let help_expanded = current.help_expanded();
+        let show_sidebar = self.stack.len() == 1 && current.is_root_nav();
+        let main_width = if show_sidebar {
+            area.width.saturating_sub(14)
+        } else {
+            area.width
         };
-        let show_sidebar = self.stack.len() == 1 && self.current().is_root_nav();
-        let root_screen = self.current().root_screen();
-        let (sidebar_area, chunks) = layout_app(area, show_sidebar, show_help);
+        let help_lines =
+            crate::ui::footer_lines(help_pairs, main_width, area.height, help_expanded);
+        let root_screen = current.root_screen();
+        let (sidebar_area, chunks) = layout_app(area, show_sidebar, help_lines);
 
         if let Some(sb) = sidebar_area {
             draw_sidebar(frame, sb, root_screen);
@@ -1767,6 +1770,7 @@ impl App {
             Paragraph::new(text).block(
                 Block::default()
                     .borders(Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
                     .border_style(theme::modal_border())
                     .title(" partitions (Esc) ")
                     .title_style(theme::block_title()),

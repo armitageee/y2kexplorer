@@ -29,6 +29,14 @@ pub struct LabelListView {
 }
 
 impl LabelListView {
+    pub fn help_pairs(&self) -> &'static [&'static str] {
+        if self.show_help {
+            HELP
+        } else {
+            HINT
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             table: TableView::new("Labels", vec!["LABEL".into(), "TOPICS".into()]),
@@ -64,10 +72,6 @@ impl LabelListView {
         let _ = cluster;
         self.table.render(frame, main);
         draw_status(frame, status_area, cluster, status, loading);
-        if self.show_help {
-            draw_help(frame, keys_area, HELP);
-        } else {
-            draw_help(frame, keys_area, HINT);
-        }
+        draw_help(frame, keys_area, self.help_pairs());
     }
 }

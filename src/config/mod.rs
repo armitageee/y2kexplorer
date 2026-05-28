@@ -27,7 +27,7 @@ pub struct Defaults {
     /// Интервал live-poll (секунды), 1–30.
     #[serde(default = "default_live_poll_secs")]
     pub live_poll_secs: u64,
-    /// UI-тема: `"dark"` (по умолчанию) или `"light"`. Можно переопределить флагом `--theme`.
+    /// UI-тема: `midnight` | `cream` | `mono` | `latte` (`dark`/`light` — алиасы).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
     /// Брать ли счётчик сообщений (high-low watermark) для каждого топика на главной странице.

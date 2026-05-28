@@ -14,8 +14,10 @@
 </p>
 
 Клавиатурный дашборд для Apache Kafka — по духу близко к
-[k9s](https://github.com/derailed/k9s), но на Rust + [ratatui](https://docs.rs/ratatui),
-со скином в эстетике Y2K/PS2: тёмно-синий фон, хром-циан, магента-акценты, двойные рамки.
+[k9s](https://github.com/derailed/k9s), но на Rust + [ratatui](https://docs.rs/ratatui).
+Интерфейс — аккуратная multi-panel вёрстка в духе
+[eilmeldung](https://github.com/christo-auer/eilmeldung): скруглённые рамки, приглушённые
+панели, выделение через инверсию, компактный status bar.
 
 [![asciicast](https://asciinema.org/a/mtFnSVROdvCeQkC7.svg)](https://asciinema.org/a/mtFnSVROdvCeQkC7)
 
@@ -32,6 +34,36 @@
 - **Kafka Connect** — коннекторы, статус/tasks, конфиг; pause / resume / restart / delete (`7` / `:connect`)
 - **Мульти-кластерный конфиг** — переключение в TUI (`:context <name>`)
 - **Аутентификация** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, **Kerberos (GSSAPI) через keytab**
+- **Темы UI** — четыре палитры (одна для тёмного терминала, три для светлого); переключение в TUI клавишей `T`
+
+## Темы интерфейса
+
+Четыре цветовые палитры под **тёмный** или **светлый** фон терминала. Задаются при
+старте (`--theme` или `defaults.theme` в конфиге) или переключаются в TUI клавишей **`T`**
+(текущая тема отображается в status bar).
+
+| Имя | Фон терминала | Характер |
+|---|---|---|
+| `midnight` (по умолчанию) | тёмный | magenta / blue — близко к дефолту eilmeldung |
+| `cream` | светлый | тёплые amber / brown |
+| `mono` | светлый | монохром, высокий контраст на белом фоне, без ярких цветов |
+| `latte` | светлый | [Catppuccin Latte](https://catppuccin.com/palette/) — приглушённые pastel |
+
+**Алиасы** (совместимость): `dark` → `midnight`, `light` → `mono`, `paper` → `mono`, `slate` → `midnight`.
+
+```bash
+y2k --theme mono
+y2k --theme latte
+```
+
+```toml
+[defaults]
+theme = "midnight"   # midnight | cream | mono | latte
+```
+
+**Строка подсказок внизу:** на узком терминале переносится на несколько строк; если всё
+равно не влезает — суффикс `… +N` (сколько подсказок скрыто). Полный список — **`?`**
+(до четырёх строк на высоком окне).
 
 ## Установка
 
@@ -127,13 +159,12 @@ $EDITOR ~/.config/y2kexplorer/config.toml
 y2k                            # дефолтный кластер из defaults.cluster
 y2k --cluster <name>           # кластер из [clusters.<name>]
 y2k --config /path/to.toml     # кастомный путь к конфигу
-y2k --theme light              # тема UI: `dark` (по умолчанию) или `light`
+y2k --theme mono              # тема UI (см. раздел «Темы интерфейса»)
 y2k-probe --cluster <name>     # smoke-тест подключения без TUI
 ```
 
-Тему можно зафиксировать в конфиге: `defaults.theme = "light"`.
-`light` — для светлого фона терминала; контент-цвета переключаются на тёмные,
-а status-bar остаётся ярко-синим в обеих темах.
+См. [Темы интерфейса](#темы-интерфейса): `midnight`, `cream`, `mono`, `latte` и алиасы
+`dark` / `light`.
 
 ### Производительность списка топиков
 
@@ -185,7 +216,8 @@ watermark_parallelism = 16     # дефолт 16
 | `r` | обновить текущий вид |
 | `:` | команды (`context`, `clusters`, `groups`, `labels`, `acls`, `schemas`, `connect`, `label`, `limit`, `poll`, `help`) |
 | `1` / `2` / `3` / `4` / `5` / `6` / `7` | sidebar: Topics / Groups / Labels / Contexts / ACLs / Schemas / Connect |
-| `?` | справка |
+| `?` | краткая / полная справка по клавишам |
+| `T` | смена темы (`midnight` → `cream` → `mono` → `latte`) |
 | `q` | выход |
 
 ### Topics

@@ -4,7 +4,9 @@ message_limit = 100
 # live-режим (f): интервал опроса новых сообщений, секунды (1–30)
 live_poll_secs = 3
 # UI-тема: "dark" (по умолчанию) или "light".
-# theme = "dark"
+# UI theme: midnight (default) | cream | mono | latte
+# Aliases: dark → midnight, light → mono, paper → mono, slate → midnight. Cycle in TUI with T.
+# theme = "midnight"
 
 # Брать ли счётчик сообщений (high-low watermark) для каждого топика на главной странице.
 # true (default) — точный counts column, но требует один RPC на партицию.

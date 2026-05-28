@@ -307,6 +307,7 @@ pub fn draw_modal(frame: &mut Frame, area: Rect, modal: &Modal, extra_buf: Optio
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(theme::modal_border())
         .title(format!(" {} ", modal.title()))
         .title_style(theme::block_title());
@@ -569,19 +570,11 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
-pub fn footer_rows(show_full_help: bool) -> u16 {
-    if show_full_help {
-        3
-    } else {
-        2
-    }
-}
-
-pub fn layout_main(area: Rect, show_full_help: bool) -> [Rect; 3] {
-    let footer = footer_rows(show_full_help);
+pub fn layout_main(area: Rect, help_lines: u16) -> [Rect; 3] {
+    let footer = help_lines.max(1);
     let chunks = Layout::vertical([
         Constraint::Min(3),
-        Constraint::Length(2),
+        Constraint::Length(1),
         Constraint::Length(footer),
     ])
     .split(area);
@@ -589,14 +582,10 @@ pub fn layout_main(area: Rect, show_full_help: bool) -> [Rect; 3] {
 }
 
 /// Sidebar (14 cols) + main/status/keys, когда на корневом экране навигации.
-pub fn layout_app(
-    area: Rect,
-    show_sidebar: bool,
-    show_full_help: bool,
-) -> (Option<Rect>, [Rect; 3]) {
+pub fn layout_app(area: Rect, show_sidebar: bool, help_lines: u16) -> (Option<Rect>, [Rect; 3]) {
     if !show_sidebar {
-        return (None, layout_main(area, show_full_help));
+        return (None, layout_main(area, help_lines));
     }
     let chunks = Layout::horizontal([Constraint::Length(14), Constraint::Min(10)]).split(area);
-    (Some(chunks[0]), layout_main(chunks[1], show_full_help))
+    (Some(chunks[0]), layout_main(chunks[1], help_lines))
 }

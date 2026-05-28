@@ -35,7 +35,7 @@ struct Cli {
     #[arg(short, long)]
     cluster: Option<String>,
 
-    /// UI theme: `dark` (default) or `light`. Overrides `defaults.theme` from config.
+    /// UI theme: `midnight` (default), `cream`, `mono`, `latte` (`dark`/`light` aliases).
     #[arg(long, value_parser = parse_palette)]
     theme: Option<Palette>,
 }
@@ -59,8 +59,7 @@ fn main() -> Result<()> {
         cfg.defaults.cluster = Some(name);
     }
 
-    // Тема: CLI > config > default(dark). Парсинг из конфига с фолбэком на dark
-    // при невалидном значении (без падения — просто варним и продолжаем).
+    // Тема: CLI > config > default(midnight). Парсинг из конфига с фолбэком на midnight.
     let palette = cli.theme.unwrap_or_else(|| {
         cfg.defaults
             .theme
@@ -68,7 +67,7 @@ fn main() -> Result<()> {
             .map(|s| s.parse::<Palette>())
             .transpose()
             .unwrap_or_else(|err| {
-                eprintln!("y2k: {err}; falling back to dark");
+                eprintln!("y2k: {err}; falling back to midnight");
                 None
             })
             .unwrap_or_default()

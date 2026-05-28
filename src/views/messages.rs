@@ -95,6 +95,14 @@ pub struct MessagesView {
 }
 
 impl MessagesView {
+    pub fn help_pairs(&self) -> &'static [&'static str] {
+        if self.show_help {
+            HELP
+        } else {
+            HINT
+        }
+    }
+
     pub fn new(topic: impl Into<String>, message_limit: usize) -> Self {
         let topic = topic.into();
         let title = format!("Messages: {topic}");
@@ -302,11 +310,7 @@ impl MessagesView {
         frame.render_widget(detail_widget, detail_area);
 
         draw_status(frame, status_area, cluster, status, loading);
-        if self.show_help {
-            draw_help(frame, keys_area, HELP);
-        } else {
-            draw_help(frame, keys_area, HINT);
-        }
+        draw_help(frame, keys_area, self.help_pairs());
     }
 }
 

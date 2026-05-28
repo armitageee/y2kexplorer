@@ -1,6 +1,6 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::ui::{draw_help, draw_status, theme};
@@ -39,6 +39,14 @@ pub struct SchemaDetailView {
 }
 
 impl SchemaDetailView {
+    pub fn help_pairs(&self) -> &'static [&'static str] {
+        if self.show_help {
+            HELP
+        } else {
+            HINT
+        }
+    }
+
     pub fn new(subject: &str) -> Self {
         Self {
             subject: subject.to_string(),
@@ -124,13 +132,7 @@ impl SchemaDetailView {
                 Span::raw("  "),
                 Span::styled(meta, theme::value()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(theme::block_border())
-                    .title(" subject ")
-                    .title_style(theme::block_title()),
-            ),
+            .block(theme::block("subject")),
             chunks[0],
         );
 
@@ -143,23 +145,13 @@ impl SchemaDetailView {
 
         frame.render_widget(
             Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(theme::block_border())
-                        .title(" schema ")
-                        .title_style(theme::block_title()),
-                )
+                .block(theme::block("schema"))
                 .wrap(Wrap { trim: false }),
             chunks[1],
         );
 
         draw_status(frame, status_area, cluster, status, loading);
-        if self.show_help {
-            draw_help(frame, keys_area, HELP);
-        } else {
-            draw_help(frame, keys_area, HINT);
-        }
+        draw_help(frame, keys_area, self.help_pairs());
     }
 }
 
