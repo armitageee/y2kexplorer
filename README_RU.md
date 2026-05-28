@@ -28,7 +28,9 @@ y2kexplorer — клавиатурный TUI для исследования и 
 - **Аутентификация** — PLAINTEXT, SASL/PLAIN, SCRAM, SSL, Kerberos (GSSAPI) через keytab.
 - Четыре **темы UI** под тёмный или светлый терминал — переключение в TUI клавишей `T`.
 
-[asciicast](.assets/demo-y2k-large.gif)
+<p align="center">
+  <img src=".assets/demo-y2k-large.gif" width="900" alt="Демо y2kexplorer">
+</p>
 
 ## Ограничения
 
