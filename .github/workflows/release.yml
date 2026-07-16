@@ -1,21 +1,58 @@
-# Release: сборка бинарников по тегу v* и публикация GitHub Release.
+# Release: при мерже в main — авто-тег (patch +1) и публикация GitHub Release.
+# CI на PR уже прогнал fmt/clippy/test; здесь только сборка артефактов.
 name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
 jobs:
+  tag:
+    name: next version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compute next patch tag
+        id: version
+        run: |
+          set -euo pipefail
+          latest=$(
+            git tag -l 'v*' --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | head -1 \
+              || true
+          )
+          if [ -z "$latest" ]; then
+            next="v0.1.0"
+          else
+            ver="${latest#v}"
+            IFS=. read -r major minor patch <<< "$ver"
+            next="v${major}.${minor}.$((patch + 1))"
+          fi
+          echo "Next release tag: $next (after ${latest:-none})"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+          echo "version=${next#v}" >> "$GITHUB_OUTPUT"
+
   build-release:
     name: release (${{ matrix.name }})
+    needs: tag
     strategy:
       fail-fast: false
       matrix:
@@ -55,8 +92,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Бампим суффикс при изменении runner-а / системных библиотек,
-          # чтобы инвалидировать stale target/ от предыдущих сборок.
           shared-key: release-${{ matrix.target }}-u2204
           cache-on-failure: false
 
@@ -71,10 +106,11 @@ jobs:
         run: brew install dylibbundler
 
       - name: Package
+        env:
+          VERSION: ${{ needs.tag.outputs.version }}
         run: |
           set -euxo pipefail
           TARGET="${{ matrix.target }}"
-          VERSION="${GITHUB_REF_NAME#v}"
           DIR="y2kexplorer-${VERSION}-${TARGET}"
           mkdir -p "${DIR}"
           cp "target/${TARGET}/release/y2k" "${DIR}/"
@@ -88,10 +124,6 @@ jobs:
               -x ./y2k -x ./y2k-probe \
               -d ./lib -p '@executable_path/lib/' )
 
-            # install_name_tool инвалидирует подпись каждого dylib, а на arm64
-            # macOS любой Mach-O без валидной подписи отвергается dyld
-            # ("library load disallowed by system policy"). Подписываем ad-hoc
-            # сами, чтобы не зависеть от того, доходит ли до этого dylibbundler.
             for f in "${DIR}"/lib/*.dylib; do
               codesign --force --sign - "$f"
             done
@@ -113,7 +145,7 @@ jobs:
 
   github-release:
     name: publish GitHub Release
-    needs: build-release
+    needs: [tag, build-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -128,10 +160,11 @@ jobs:
         run: find artifacts -type f | sort
 
       - name: Render install notes
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+          VERSION: ${{ needs.tag.outputs.version }}
         run: |
           set -euxo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
           sed -e "s/__TAG__/${TAG}/g" -e "s/__VERSION__/${VERSION}/g" \
             .github/release-notes-template.md > install-notes.md
           echo "--- install-notes.md ---"
@@ -139,6 +172,9 @@ jobs:
 
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          name: ${{ needs.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           append_body: true
           body_path: install-notes.md
