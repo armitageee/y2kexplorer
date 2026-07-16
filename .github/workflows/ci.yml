@@ -1,10 +1,8 @@
 # CI: fmt, clippy, tests, multi-platform build (y2k + y2k-probe).
+# Только pull request — после мержа в main релиз собирается workflow Release.
 name: CI
 
 on:
-  # push — только после мержа в основные ветки; feat/* проверяем через pull_request.
-  push:
-    branches: [main, master, develop]
   pull_request:
     branches: [main, master, develop]
 
