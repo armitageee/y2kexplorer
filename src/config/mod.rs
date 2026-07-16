@@ -207,7 +207,11 @@ pub fn krb5_ca_candidates(krb5_conf: &Path) -> Vec<String> {
     out
 }
 
-/// Kerberos через keytab: krb5.conf + отдельный FILE ccache (не macOS UUID cache).
+/// Kerberos через keytab: `krb5.conf` + путь к keytab.
+///
+/// На Linux — отдельный FILE ccache в `/tmp` (не смешивать с login session).
+/// На macOS Heimdal (в т.ч. Tahoe 26+) `KRB5CCNAME=FILE:...` игнорируется: `kinit`
+/// кладёт билеты в API cache, а GSSAPI/librdkafka читают пустой FILE → auth fail.
 pub fn apply_kerberos_env(auth: &AuthConfig) {
     let AuthConfig::Kerberos {
         keytab, krb5_conf, ..
@@ -222,9 +226,18 @@ pub fn apply_kerberos_env(auth: &AuthConfig) {
 
     set_env_var("KRB5_CLIENT_KTNAME", keytab.display().to_string());
 
-    // Свой ccache в /tmp: kinit возьмёт ticket из keytab, не из login session
-    let ccache = format!("FILE:/tmp/y2kexplorer-{}.ccache", std::process::id());
-    set_env_var("KRB5CCNAME", ccache);
+    #[cfg(target_os = "macos")]
+    {
+        // Не наследовать KRB5CCNAME=FILE:... из shell — иначе GSSAPI читает пустой файл.
+        // SAFETY: перед созданием rdkafka-клиента в том же потоке.
+        unsafe { std::env::remove_var("KRB5CCNAME") };
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let ccache = format!("FILE:/tmp/y2kexplorer-{}.ccache", std::process::id());
+        set_env_var("KRB5CCNAME", ccache);
+    }
 }
 
 fn set_env_var(key: &str, value: String) {
