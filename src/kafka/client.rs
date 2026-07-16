@@ -366,10 +366,8 @@ impl ClusterConnection {
         for done in 1..=total_parts {
             let (_, part_result) = rx.recv().context("messages worker channel closed")?;
             on_progress(done, total_parts);
-            match part_result {
-                Ok(mut part_msgs) => out.append(&mut part_msgs),
-                Err(e) => return Err(e),
-            }
+            let mut part_msgs = part_result?;
+            out.append(&mut part_msgs);
         }
 
         sort_fetched(
@@ -946,7 +944,6 @@ fn base_config(cluster: &ClusterConfig) -> ClientConfig {
             service_name,
             tls,
             tls_verify_hostname,
-            krb5_conf: _,
             ..
         } => {
             let ca = resolve_kerberos_ssl_ca(&cluster.auth);
